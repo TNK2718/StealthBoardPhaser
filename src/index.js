@@ -50,7 +50,7 @@ function create() {
 
 function update() { }
 
-function placeShip(x, y) {
+export default function placeShip(x, y) {
   if (!gameState.grid[y][x]) {
     gameState.grid[y][x] = 'ship';
     game.scene.scenes[0].add.image(80 * x + 40, 80 * y + 40, 'ship').setDisplaySize(80, 80);
