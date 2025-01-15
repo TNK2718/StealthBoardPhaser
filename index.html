@@ -5,6 +5,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebRTC Room Game</title>
+  <style>
+    .room-list {
+      margin: 20px 0;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .room-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      margin: 5px 0;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+
+    .room-item button {
+      padding: 5px 10px;
+    }
+  </style>
 </head>
 
 <body>
@@ -17,15 +39,18 @@
       <button id="joinRoom">Join Room</button>
     </div>
 
+    <div class="room-list" id="roomList">
+      <h2>Available Rooms</h2>
+      <div id="roomListContent"></div>
+    </div>
+
     <div id="status" class="status">
       Waiting for connection...
     </div>
 
-    <div id="gameContainer">
+    <div id="gameContainer" style="display: none;">
       <h2>Game Area</h2>
-      <div id="gameContent">
-        <!-- Game content will be dynamically inserted here -->
-      </div>
+      <div id="gameContent"></div>
     </div>
   </div>
 </body>

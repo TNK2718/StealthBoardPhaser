@@ -1,4 +1,3 @@
-// server/server.js
 const express = require('express');
 const path = require('path');
 const http = require('http');
@@ -18,8 +17,27 @@ const rooms = new Map();
 
 app.use(express.static(path.join(__dirname, '../dist')));
 
+// 部屋リストをクライアントが理解できる形式に変換する関数
+function getRoomsList() {
+    return Array.from(rooms.values()).map(room => ({
+        id: room.id,
+        players: room.players,
+        status: room.signaling.status
+    }));
+}
+
+// 全クライアントに部屋リストを送信する関数
+function broadcastRoomsList() {
+    io.emit('roomList', getRoomsList());
+}
+
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
+
+    // 部屋リスト取得リクエストのハンドラを追加
+    socket.on('getRooms', () => {
+        socket.emit('roomList', getRoomsList());
+    });
 
     // Create Room
     socket.on('createRoom', () => {
@@ -38,6 +56,7 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         socket.emit('roomCreated', { roomId, playerId: socket.id });
         console.log('Room created:', roomId);
+        broadcastRoomsList(); // 部屋作成後にリストを更新
     });
 
     // Join Room
@@ -70,6 +89,7 @@ io.on('connection', (socket) => {
             players: room.players,
             joinedPlayer: socket.id
         });
+        broadcastRoomsList(); // プレイヤー参加後にリストを更新
     });
 
     // WebRTC Signaling
@@ -84,6 +104,7 @@ io.on('connection', (socket) => {
         if (otherPlayer) {
             io.to(otherPlayer).emit('offer', { offer, from: socket.id });
         }
+        broadcastRoomsList(); // シグナリング状態変更後にリストを更新
     });
 
     socket.on('answer', ({ roomId, answer, to }) => {
@@ -103,6 +124,7 @@ io.on('connection', (socket) => {
         if (status === 'connected') {
             io.to(roomId).emit('roomReady', { roomId });
         }
+        broadcastRoomsList(); // 接続状態変更後にリストを更新
     });
 
     socket.on('gameMove', ({ roomId, move }) => {
@@ -133,6 +155,7 @@ io.on('connection', (socket) => {
                     rooms.delete(roomId);
                     console.log('Room deleted:', roomId);
                 }
+                broadcastRoomsList(); // プレイヤー退出後にリストを更新
             }
         }
     });
