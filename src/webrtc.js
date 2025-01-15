@@ -1,96 +1,238 @@
-import io from 'socket.io-client';
-import placeShip from './index.js';
-
-const socket = io('http://localhost:3000');
-let peerConnection;
-let dataChannel;
-let isReady = false;
+let peerConnection = null;
+let dataChannel = null;
+let currentSocket = null;
+let currentRoomId = null;
+let currentPeerId = null;
 
 const config = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ]
 };
 
-const connectionCallbacks = [];
+export const initWebRTC = async (isMaster, socket, roomId, peerId) => {
+  cleanup(); // 既存の接続をクリーンアップ
 
-export async function initWebRTC(isMaster) {
-  peerConnection = new RTCPeerConnection(config);
+  currentSocket = socket;
+  currentRoomId = roomId;
+  currentPeerId = peerId;
 
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit('ice-candidate', event.candidate);
+  try {
+    await createPeerConnection(isMaster);
+    setupSocketHandlers();
+
+    if (isMaster) {
+      await createAndSendOffer();
     }
-  };
+  } catch (error) {
+    console.error('WebRTC initialization failed:', error);
+    throw error;
+  }
+};
 
-  if (isMaster) {
-    dataChannel = peerConnection.createDataChannel('game');
-    setupDataChannel(dataChannel);
+const createPeerConnection = async (isMaster) => {
+  try {
+    peerConnection = new RTCPeerConnection(config);
 
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-    socket.emit('offer', offer);
-  } else {
-    peerConnection.ondatachannel = (event) => {
-      dataChannel = event.channel;
-      setupDataChannel(dataChannel);
+    peerConnection.onicecandidate = ({ candidate }) => {
+      if (candidate && currentSocket && currentPeerId) {
+        currentSocket.emit('iceCandidate', {
+          roomId: currentRoomId,
+          candidate,
+          to: currentPeerId
+        });
+      }
     };
+
+    peerConnection.onconnectionstatechange = () => {
+      console.log('Connection state:', peerConnection.connectionState);
+      if (peerConnection.connectionState === 'connected') {
+        currentSocket?.emit('connectionStatus', {
+          roomId: currentRoomId,
+          status: 'connected'
+        });
+      }
+    };
+
+    if (isMaster) {
+      try {
+        dataChannel = peerConnection.createDataChannel('gameChannel', {
+          ordered: true
+        });
+        setupDataChannel(dataChannel);
+      } catch (error) {
+        console.error('Error creating data channel:', error);
+        throw error;
+      }
+    } else {
+      peerConnection.ondatachannel = (event) => {
+        dataChannel = event.channel;
+        setupDataChannel(dataChannel);
+      };
+    }
+  } catch (error) {
+    console.error('Error creating peer connection:', error);
+    throw error;
   }
+};
 
-  socket.on('offer', async (offer) => {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    socket.emit('answer', answer);
-  });
+const setupDataChannel = (channel) => {
+  channel.onopen = () => {
+    console.log('Data channel is open');
+    notifyConnectionReady();
+  };
 
-  socket.on('answer', async (answer) => {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    markConnectionReady();
-  });
+  channel.onclose = () => {
+    console.log('Data channel is closed');
+  };
 
-  socket.on('ice-candidate', async (candidate) => {
-    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-  });
+  channel.onerror = (error) => {
+    console.error('Data channel error:', error);
+  };
 
-  peerConnection.onconnectionstatechange = () => {
-    if (peerConnection.connectionState === 'connected') {
-      markConnectionReady();
+  channel.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data);
+      handleGameMessage(message);
+    } catch (error) {
+      console.error('Error parsing message:', error);
     }
   };
-}
+};
 
-function setupDataChannel(channel) {
-  channel.onopen = () => {
-    markConnectionReady();
+const setupSocketHandlers = () => {
+  if (!currentSocket) return;
+
+  const handlers = {
+    offer: async ({ offer, from }) => {
+      try {
+        if (peerConnection.signalingState !== "stable") {
+          console.log("Signaling state is not stable, waiting...");
+          return;
+        }
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        currentSocket.emit('answer', {
+          roomId: currentRoomId,
+          answer,
+          to: from
+        });
+      } catch (error) {
+        console.error('Error handling offer:', error);
+      }
+    },
+
+    answer: async ({ answer }) => {
+      try {
+        if (peerConnection.signalingState === "have-local-offer") {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+      } catch (error) {
+        console.error('Error handling answer:', error);
+      }
+    },
+
+    iceCandidate: async ({ candidate }) => {
+      try {
+        if (candidate && peerConnection.remoteDescription) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      } catch (error) {
+        console.error('Error handling ICE candidate:', error);
+      }
+    }
   };
-  channel.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    handleGameMessage(message);
-  };
-}
 
-function markConnectionReady() {
-  if (!isReady) {
-    isReady = true;
-    connectionCallbacks.forEach((callback) => callback());
+  // Remove existing handlers if any
+  currentSocket.off('offer');
+  currentSocket.off('answer');
+  currentSocket.off('iceCandidate');
+
+  // Add new handlers
+  Object.entries(handlers).forEach(([event, handler]) => {
+    currentSocket.on(event, handler);
+  });
+};
+
+const createAndSendOffer = async () => {
+  try {
+    if (!peerConnection || peerConnection.signalingState !== "stable") {
+      console.error('PeerConnection is not in stable state');
+      return;
+    }
+
+    const offer = await peerConnection.createOffer({
+      offerToReceiveAudio: false,
+      offerToReceiveVideo: false
+    });
+
+    await peerConnection.setLocalDescription(offer);
+
+    // Wait for ICE gathering to complete
+    await new Promise((resolve) => {
+      if (peerConnection.iceGatheringState === 'complete') {
+        resolve();
+      } else {
+        const checkState = () => {
+          if (peerConnection.iceGatheringState === 'complete') {
+            peerConnection.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }
+        };
+        peerConnection.addEventListener('icegatheringstatechange', checkState);
+      }
+    });
+
+    currentSocket?.emit('offer', {
+      roomId: currentRoomId,
+      offer: peerConnection.localDescription
+    });
+  } catch (error) {
+    console.error('Error creating offer:', error);
+    throw error;
   }
-}
+};
 
-export function sendGameMessage(message) {
-  if (dataChannel && dataChannel.readyState === 'open') {
-    dataChannel.send(JSON.stringify(message));
+const handleGameMessage = (message) => {
+  const event = new CustomEvent('gameMessage', { detail: message });
+  window.dispatchEvent(event);
+};
+
+export const sendGameMove = (moveData) => {
+  if (dataChannel?.readyState === 'open') {
+    try {
+      dataChannel.send(JSON.stringify(moveData));
+    } catch (error) {
+      console.error('Error sending game move:', error);
+    }
   }
-}
+};
 
-export function onConnectionReady(callback) {
-  if (isReady) {
+const connectionReadyCallbacks = new Set();
+
+const notifyConnectionReady = () => {
+  connectionReadyCallbacks.forEach(callback => callback());
+};
+
+export const onConnectionReady = (callback) => {
+  if (dataChannel?.readyState === 'open') {
     callback();
   } else {
-    connectionCallbacks.push(callback);
+    connectionReadyCallbacks.add(callback);
   }
-}
+};
 
-function handleGameMessage(message) {
-  if (message.type === 'placeShip') {
-    placeShip(message.x, message.y);
+export const cleanup = () => {
+  if (dataChannel) {
+    dataChannel.close();
   }
-}
+  if (peerConnection) {
+    peerConnection.close();
+  }
+  dataChannel = null;
+  peerConnection = null;
+  connectionReadyCallbacks.clear();
+};

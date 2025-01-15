@@ -1,17 +1,33 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phaser WebRTC Game</title>
+  <title>WebRTC Room Game</title>
 </head>
 
 <body>
-  <h1>P2P Naval Battle Game</h1>
-  <div id="game"></div>
-  <p id="status">Waiting for connection...</p>
-  <script src="./main.js" type="module"></script>
+  <div class="container">
+    <h1>WebRTC Room Game</h1>
+
+    <div class="room-controls">
+      <button id="createRoom">Create Room</button>
+      <input type="text" id="roomId" placeholder="Enter Room ID">
+      <button id="joinRoom">Join Room</button>
+    </div>
+
+    <div id="status" class="status">
+      Waiting for connection...
+    </div>
+
+    <div id="gameContainer">
+      <h2>Game Area</h2>
+      <div id="gameContent">
+        <!-- Game content will be dynamically inserted here -->
+      </div>
+    </div>
+  </div>
 </body>
 
 </html>
