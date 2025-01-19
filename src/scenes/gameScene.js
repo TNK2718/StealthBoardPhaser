@@ -1,39 +1,36 @@
 import Phaser from 'phaser';
+import { GameLogic } from '../gameLogic';
+import { sendGameMove } from '../webrtc';
 
-export class BattleshipGame {
+export class GameScene extends Phaser.Scene {
     constructor() {
-        this.gameState = {
-            grid: Array(5).fill().map(() => Array(5).fill(null)),
-        };
-        this.game = null;
+        super({ key: 'GameScene' });
+        this.gameLogic = new GameLogic();
+        this.isMaster = false;
+        this.onGameMove = null; // Callback function for sending moves
+
+        window.addEventListener('gameMessage', (event) => {
+            this.handleGameMessage(event.detail);
+        });
     }
 
-    init(isMaster) {
-        this.isMaster = isMaster;
-        const config = {
-            type: Phaser.AUTO,
-            width: 400,
-            height: 400,
-            parent: 'gameContent',
-            scene: {
-                preload: this.preload.bind(this),
-                create: this.create.bind(this),
-                update: this.update.bind(this),
-            },
-        };
-        this.game = new Phaser.Game(config);
+    init(data) {
+        this.isMaster = data.isMaster;
     }
 
     preload() {
-        this.game.scene.scenes[0].load.image('water', 'assets/bg.png');
-        this.game.scene.scenes[0].load.image('ship', 'assets/CyanCardBack.png');
+        this.load.image('water', 'assets/bg.png');
+        this.load.image('ship', 'assets/CyanCardBack.png');
     }
 
     create() {
-        const scene = this.game.scene.scenes[0];
+        this.createGrid();
+    }
+
+    createGrid() {
         for (let i = 0; i < 5; i++) {
             for (let j = 0; j < 5; j++) {
-                let tile = scene.add.image(80 * j + 40, 80 * i + 40, 'water')
+                let tile = this.add.image(80 * j + 40, 80 * i + 40, 'water')
                     .setDisplaySize(80, 80)
                     .setInteractive();
 
@@ -41,16 +38,17 @@ export class BattleshipGame {
                 tile.setData('y', i);
 
                 tile.on('pointerdown', () => {
-                    // タイルクリック時に座標情報を送信
-                    const moveData = {
-                        type: 'placeShip',
-                        x: j,
-                        y: i
-                    };
-                    // ローカルでも配置を実行
-                    this.placeShip(j, i);
-                    // 他のプレイヤーに送信
-                    this.onGameMove(moveData);
+                    const x = tile.getData('x');
+                    const y = tile.getData('y');
+                    // Perform ship placement
+                    const placedShip = this.gameLogic.placeShip(x, y);
+                    if (placedShip) {
+                        // Visual update for ship placement
+                        this.add.image(80 * x + 40, 80 * y + 40, 'ship').setDisplaySize(80, 80);
+                        // Send move to other player
+                        const moveData = { type: 'placeShip', x, y };
+                        sendGameMove(moveData);
+                    }
                 });
             }
         }
@@ -60,22 +58,13 @@ export class BattleshipGame {
         // Add game update logic here
     }
 
-    placeShip(x, y) {
-        if (!this.gameState.grid[y][x]) {
-            this.gameState.grid[y][x] = 'ship';
-            this.game.scene.scenes[0].add.image(80 * x + 40, 80 * y + 40, 'ship')
-                .setDisplaySize(80, 80);
-        }
-    }
 
     handleGameMessage(message) {
-        if (message.type === 'placeShip') {
-            this.placeShip(message.x, message.y);
+        const placedShip = this.gameLogic.handleGameMessage(message);
+        console.log(placedShip);
+        if (placedShip) {
+            // Visual update for ship placement
+            this.add.image(80 * placedShip.x + 40, 80 * placedShip.y + 40, 'ship').setDisplaySize(80, 80);
         }
-    }
-
-    // 移動情報を送信するためのコールバック関数
-    setMoveCallback(callback) {
-        this.onGameMove = callback;
     }
 }
