@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import { LobbyScene } from './scenes/lobbyScene';
 import { GameScene } from './scenes/gameScene';
+import { io } from 'socket.io-client';
+
+let socket = io('http://localhost:3000');
 
 const config = {
   type: Phaser.AUTO,
@@ -11,3 +14,4 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+game.socket = socket;
