@@ -201,7 +201,7 @@ const handleGameMessage = (message) => {
   window.dispatchEvent(event);
 };
 
-export const sendGameMove = (moveData) => {
+export const sendGameMessage = (moveData) => {
   if (dataChannel?.readyState === 'open') {
     try {
       dataChannel.send(JSON.stringify(moveData));
