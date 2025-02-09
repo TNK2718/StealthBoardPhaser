@@ -24,9 +24,10 @@ export class GameScene extends Phaser.Scene {
         this.turnReadyStates = { host: false, guest: false };
         this.turnReadyTimer = null;
 
-        // スキル発動用：発動元カードの参照と、表示するスキルメニュー画像の参照
+        // スキル発動用：発動元カードの参照、スキルメニュー画像および上部テキストの参照
         this.skillSourceCard = null;
         this.skillMenuSprite = null;
+        this.skillMenuText = null;
     }
 
     preload() {
@@ -41,7 +42,7 @@ export class GameScene extends Phaser.Scene {
         // ターン状態表示用テキスト（画面下部中央）
         this.turnStatusText = this.add.text(
             this.cameras.main.centerX,
-            this.cameras.main.height - 50,
+            this.cameras.main.height - 40,
             "Waiting for turn start...",
             { fontSize: '20px', fill: '#ffffff' }
         ).setOrigin(0.5);
@@ -53,14 +54,16 @@ export class GameScene extends Phaser.Scene {
         this.startTurn();
     }
 
-    // --- グリッド描画およびヘルパー関数 ---
+    // グリッドは縦7行×横3列（縦長）の構成
     setupGrid() {
-        this.cols = 7;
-        this.rows = 3;
-        this.cellSize = 80;
+        this.cols = 3;
+        this.rows = 7;
+        // セルサイズを60pxに変更
+        this.cellSize = 60;
+        // gridOrigin.y を50に設定（画面上部から余白を少なめに）
         this.gridOrigin = {
             x: (this.cameras.main.width - this.cols * this.cellSize) / 2,
-            y: 100
+            y: 50
         };
 
         this.gridGraphics = this.add.graphics();
@@ -99,32 +102,31 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    // --- カード作成 ---
+    // カード配置：ゲスト側は上段（row = 0）、ホスト側は下段（row = rows-1 ＝6）
     createCards() {
-        // ホスト側は下段（row = 2）、ゲスト側は上段（row = 0）
-        const hostColumns = [1, 3, 5];
-        const guestColumns = [1, 3, 5];
+        const guestColumns = [0, 1, 2];
+        const hostColumns = [0, 1, 2];
 
-        const hostStats = [
-            { id: 'host_0', hp: 3, speed: 10 },
-            { id: 'host_1', hp: 3, speed: 8 },
-            { id: 'host_2', hp: 3, speed: 6 }
-        ];
         const guestStats = [
             { id: 'guest_0', hp: 3, speed: 9 },
             { id: 'guest_1', hp: 3, speed: 7 },
             { id: 'guest_2', hp: 3, speed: 5 }
         ];
-
-        hostStats.forEach((cardStat, index) => {
-            const col = hostColumns[index];
-            const row = 2;
-            this.createCard(cardStat, col, row);
-        });
+        const hostStats = [
+            { id: 'host_0', hp: 3, speed: 10 },
+            { id: 'host_1', hp: 3, speed: 8 },
+            { id: 'host_2', hp: 3, speed: 6 }
+        ];
 
         guestStats.forEach((cardStat, index) => {
             const col = guestColumns[index];
             const row = 0;
+            this.createCard(cardStat, col, row);
+        });
+
+        hostStats.forEach((cardStat, index) => {
+            const col = hostColumns[index];
+            const row = this.rows - 1; // row 6
             this.createCard(cardStat, col, row);
         });
     }
@@ -155,7 +157,7 @@ export class GameScene extends Phaser.Scene {
         };
         this.cards[card.id] = card;
 
-        // 自分が操作するカードのみ、入力（ドラッグ＆ドロップ、スキル発動）を有効化
+        // 自分が操作するカードのみ、入力を有効化
         if (card.owner === this.localPlayer) {
             cardContainer.setSize(this.cellSize - 10, this.cellSize - 10);
             cardContainer.setInteractive();
@@ -175,7 +177,6 @@ export class GameScene extends Phaser.Scene {
                 cardContainer.y = dragY;
             });
 
-            // ドラッグ終了時は一旦元の位置へ戻し、移動先が有効なら移動アクションを登録
             cardContainer.on('dragend', (pointer) => {
                 if (this.turnActions[this.localPlayer]) return;
                 if (cardContainer.hasMoved) {
@@ -200,7 +201,6 @@ export class GameScene extends Phaser.Scene {
                 }
             });
 
-            // ドラッグせずにタップした場合はスキル発動モードへ
             cardContainer.on('pointerup', (pointer) => {
                 if (this.turnActions[this.localPlayer]) return;
                 if (!cardContainer.hasMoved) {
@@ -210,13 +210,15 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    // --- スキルメニュー関連 ---
-    // スキルメニューは、カードの右上または左上にオフセットして表示します。
-    // 表示後、メニュー以外の場所がクリックされた場合はメニューを非表示にします。
+    // スキルメニューの表示：カードの右上または左上にオフセットして表示し、上部に「Atk」の文字を追加
     showSkillMenu(card, cardContainer) {
         if (this.skillMenuSprite) {
             this.skillMenuSprite.destroy();
             this.skillMenuSprite = null;
+        }
+        if (this.skillMenuText) {
+            this.skillMenuText.destroy();
+            this.skillMenuText = null;
         }
         let offsetX = 40, offsetY = -40;
         if (cardContainer.x > this.cameras.main.centerX) {
@@ -231,18 +233,26 @@ export class GameScene extends Phaser.Scene {
         this.skillMenuSprite.setInteractive();
         this.input.setDraggable(this.skillMenuSprite);
 
+        // 「Atk」テキストをメニューの上部に表示
+        this.skillMenuText = this.add.text(menuX, menuY - (desiredSize / 2) - 5, 'Atk', {
+            fontSize: '12px',
+            fill: '#ffffff'
+        }).setOrigin(0.5);
+
         this.skillMenuSprite.on('drag', (pointer, dragX, dragY) => {
             this.skillMenuSprite.x = dragX;
             this.skillMenuSprite.y = dragY;
+            this.skillMenuText.x = dragX;
+            this.skillMenuText.y = dragY - (desiredSize / 2) - 5;
         });
 
         this.skillMenuSprite.on('dragend', (pointer) => {
             const targetPos = this.getNearestGridPosition(this.skillMenuSprite.x, this.skillMenuSprite.y);
             const center = this.getCellCenter(targetPos.col, targetPos.row);
             this.tweens.add({
-                targets: this.skillMenuSprite,
+                targets: [this.skillMenuSprite, this.skillMenuText],
                 x: center.x,
-                y: center.y,
+                y: center.y - (desiredSize / 2) - 5,
                 duration: 200,
                 onComplete: () => {
                     this.registerLocalAction({
@@ -251,20 +261,22 @@ export class GameScene extends Phaser.Scene {
                         destination: { col: targetPos.col, row: targetPos.row }
                     });
                     this.skillMenuSprite.destroy();
+                    this.skillMenuText.destroy();
                     this.skillMenuSprite = null;
+                    this.skillMenuText = null;
                 }
             });
         });
 
-        // ★★ 追加 ★★
-        // スキルメニューが表示された後、メニュー以外の場所がクリックされた場合はメニューを非表示にする
-        // 少し遅延を入れて、現在のクリックイベントの影響を避ける
+        // メニュー以外がクリックされた場合、メニューを破棄する処理（once リスナー）
         this.time.delayedCall(1, () => {
             this.input.once('pointerdown', (pointer, currentlyOver) => {
                 if (!currentlyOver || !currentlyOver.includes(this.skillMenuSprite)) {
                     if (this.skillMenuSprite) {
                         this.skillMenuSprite.destroy();
+                        this.skillMenuText && this.skillMenuText.destroy();
                         this.skillMenuSprite = null;
+                        this.skillMenuText = null;
                     }
                 }
             });
@@ -287,14 +299,14 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    // --- ターン開始の準備通信 ---
+    // ターン開始の準備通信
     sendTurnReady() {
         sendGameMessage(JSON.stringify({ type: 'turnReady', from: this.localPlayer }));
         if (!this.isMaster) {
             if (this.turnReadyTimer) clearTimeout(this.turnReadyTimer);
-            this.turnReadyTimer = setTimeout(() => {
+            this.turnReadyTimer = this.time.delayedCall(3000, () => {
                 this.sendTurnReady();
-            }, 3000);
+            });
         }
     }
 
@@ -308,7 +320,7 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    // ターン開始要求（双方の準備完了を待つ）
+    // ターン開始要求
     startTurn() {
         console.log("Starting turn coordination");
         this.turnActions = {};
@@ -322,7 +334,7 @@ export class GameScene extends Phaser.Scene {
         this.sendTurnReady();
     }
 
-    // --- ターン行動の登録 ---
+    // ターン行動の登録（1ターン1回）
     registerLocalAction(action) {
         if (this.turnActions[this.localPlayer]) return;
         this.turnActions[this.localPlayer] = action;
@@ -357,7 +369,7 @@ export class GameScene extends Phaser.Scene {
         playNext();
     }
 
-    // --- ターン解決（ホスト側で実行） ---
+    // ターン解決（ホスト側で実行）
     resolveTurn() {
         const hostAction = this.turnActions['host'];
         const guestAction = this.turnActions['guest'];
@@ -395,7 +407,6 @@ export class GameScene extends Phaser.Scene {
                     duration: 500
                 });
             } else if (action.actionType === 'skill') {
-                // 同士討ち禁止のため、対象カードは発動元カードと所有者が異なるもの
                 const targetGrid = action.destination;
                 const enemyCard = Object.values(this.cards).find(c =>
                     c.owner !== card.owner &&
@@ -404,27 +415,38 @@ export class GameScene extends Phaser.Scene {
                     c.hp > 0
                 );
                 if (enemyCard) {
+                    const sourceCenter = this.getCellCenter(card.col, card.row);
+                    const targetCenter = this.getCellCenter(enemyCard.col, enemyCard.row);
+                    // 弾のアニメーション（黄色い弾）
+                    let bullet = this.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
                     tweenConfigs.push({
-                        targets: enemyCard.container,
-                        alpha: 0.5,
-                        duration: 200,
-                        yoyo: true,
+                        targets: bullet,
+                        x: targetCenter.x,
+                        y: targetCenter.y,
+                        duration: 300,
                         onComplete: () => {
-                            enemyCard.hp -= 1;
-                            enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                            bullet.destroy();
+                            // 敵カードの sprite を赤く点滅させる
+                            enemyCard.sprite.setTint(0xff0000);
+                            this.time.delayedCall(100, () => {
+                                enemyCard.sprite.clearTint();
+                                enemyCard.hp -= 1;
+                                enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                            });
                         }
                     });
                     animationCommands.push({
                         type: 'skill',
+                        sourceCardId: card.id,
                         targetCardId: enemyCard.id,
-                        duration: 200,
-                        yoyo: true
+                        bulletDuration: 300,
+                        flashDuration: 100
                     });
                 }
             }
         });
 
-        // ホスト側でアニメーション実行後、"turnAnimation" メッセージで送信
+        // ホスト側でアニメーション実行後、"turnAnimation" を送信
         this.playTweenSequence(tweenConfigs, () => {
             const turnResult = { state: {} };
             Object.values(this.cards).forEach(card => {
@@ -446,7 +468,7 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    // --- ゲスト側：受信した turnAnimation を再現 ---
+    // ゲスト側：受信した turnAnimation を再現
     playTurnAnimation(commands, finalState) {
         const tweenConfigs = [];
         commands.forEach(cmd => {
@@ -466,16 +488,25 @@ export class GameScene extends Phaser.Scene {
                     });
                 }
             } else if (cmd.type === 'skill') {
+                const sourceCard = this.cards[cmd.sourceCardId];
                 const enemyCard = this.cards[cmd.targetCardId];
-                if (enemyCard) {
+                if (sourceCard && enemyCard) {
+                    const sourceCenter = this.getCellCenter(sourceCard.col, sourceCard.row);
+                    const targetCenter = this.getCellCenter(enemyCard.col, enemyCard.row);
+                    let bullet = this.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
                     tweenConfigs.push({
-                        targets: enemyCard.container,
-                        alpha: 0.5,
-                        duration: cmd.duration,
-                        yoyo: cmd.yoyo,
+                        targets: bullet,
+                        x: targetCenter.x,
+                        y: targetCenter.y,
+                        duration: cmd.bulletDuration,
                         onComplete: () => {
-                            enemyCard.hp -= 1;
-                            enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                            bullet.destroy();
+                            enemyCard.sprite.setTint(0xff0000);
+                            this.time.delayedCall(cmd.flashDuration, () => {
+                                enemyCard.sprite.clearTint();
+                                enemyCard.hp -= 1;
+                                enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                            });
                         }
                     });
                 }
@@ -496,7 +527,7 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    // --- 通信メッセージ処理 ---
+    // 通信メッセージ処理
     handleGameMessage(event) {
         const message = event.detail;
         const parsed = typeof message === 'string' ? JSON.parse(message) : message;
