@@ -301,6 +301,14 @@ export class GameScene extends Phaser.Scene {
 
     // ターン開始の準備通信
     sendTurnReady() {
+        if (this.turnActions[this.localPlayer]) {
+            if (this.turnReadyTimer) {
+                clearTimeout(this.turnReadyTimer);
+                this.turnReadyTimer = null;
+            }
+            return;
+        }
+
         sendGameMessage(JSON.stringify({ type: 'turnReady', from: this.localPlayer }));
         if (!this.isMaster) {
             if (this.turnReadyTimer) clearTimeout(this.turnReadyTimer);
