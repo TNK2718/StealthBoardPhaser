@@ -5,6 +5,9 @@ import { sendGameMessage } from '../webrtc';
 export class GameScene extends Phaser.Scene {
     constructor() {
         super('GameScene');
+        // インジケーター用配列の初期化
+        this.moveIndicators = [];
+        this.skillIndicators = [];
     }
 
     init(data) {
@@ -31,6 +34,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     preload() {
+        // グリッド背景用の tile 画像を読み込み
+        this.load.image('tile', 'assets/bg.png');
         this.load.image('ship', 'assets/CyanCardBack.png');
         this.load.image('skill', 'assets/skill.jpg');
     }
@@ -55,30 +60,25 @@ export class GameScene extends Phaser.Scene {
     }
 
     // グリッドは縦7行×横3列（縦長）の構成
+    // セルサイズは60px。ここではグリッドの各セルに背景画像を配置する
     setupGrid() {
         this.cols = 3;
         this.rows = 7;
-        // セルサイズを60pxに変更
         this.cellSize = 60;
-        // gridOrigin.y を50に設定（画面上部から余白を少なめに）
         this.gridOrigin = {
             x: (this.cameras.main.width - this.cols * this.cellSize) / 2,
             y: 50
         };
 
-        this.gridGraphics = this.add.graphics();
-        this.gridGraphics.lineStyle(2, 0xffffff, 1);
-        for (let c = 0; c <= this.cols; c++) {
-            const x = this.gridOrigin.x + c * this.cellSize;
-            this.gridGraphics.moveTo(x, this.gridOrigin.y);
-            this.gridGraphics.lineTo(x, this.gridOrigin.y + this.rows * this.cellSize);
+        // 各セルに tile 画像を配置（グリッド背景）
+        for (let r = 0; r < this.rows; r++) {
+            for (let c = 0; c < this.cols; c++) {
+                const center = this.getCellCenter(c, r);
+                let tile = this.add.image(center.x, center.y, 'tile');
+                // セルサイズに合わせて画像サイズを調整
+                tile.setDisplaySize(this.cellSize, this.cellSize);
+            }
         }
-        for (let r = 0; r <= this.rows; r++) {
-            const y = this.gridOrigin.y + r * this.cellSize;
-            this.gridGraphics.moveTo(this.gridOrigin.x, y);
-            this.gridGraphics.lineTo(this.gridOrigin.x + this.cols * this.cellSize, y);
-        }
-        this.gridGraphics.strokePath();
     }
 
     getNearestGridPosition(x, y) {
@@ -135,8 +135,9 @@ export class GameScene extends Phaser.Scene {
         const center = this.getCellCenter(col, row);
         const cardContainer = this.add.container(center.x, center.y);
         const cardSprite = this.add.image(0, 0, 'ship');
-        const scale = (this.cellSize - 10) / cardSprite.width;
-        cardSprite.setScale(scale);
+        // カードはグリッドより一回り小さく表示（ここではセルサイズの80%に設定）
+        const desiredCardSize = this.cellSize * 0.8;
+        cardSprite.setDisplaySize(desiredCardSize, desiredCardSize);
         cardContainer.add(cardSprite);
         const statsText = this.add.text(-this.cellSize / 4, -this.cellSize / 4, `HP:${cardData.hp}\nSPD:${cardData.speed}`, {
             fontSize: '12px',
@@ -159,7 +160,7 @@ export class GameScene extends Phaser.Scene {
 
         // 自分が操作するカードのみ、入力を有効化
         if (card.owner === this.localPlayer) {
-            cardContainer.setSize(this.cellSize - 10, this.cellSize - 10);
+            cardContainer.setSize(desiredCardSize, desiredCardSize);
             cardContainer.setInteractive();
             this.input.setDraggable(cardContainer);
 
@@ -168,6 +169,8 @@ export class GameScene extends Phaser.Scene {
                 cardContainer.startX = pointer.x;
                 cardContainer.startY = pointer.y;
                 cardContainer.hasMoved = false;
+                // 移動可能なセル（横・縦方向）のインジケーターを表示
+                this.showMoveIndicators(card);
             });
 
             cardContainer.on('drag', (pointer, dragX, dragY) => {
@@ -179,6 +182,8 @@ export class GameScene extends Phaser.Scene {
 
             cardContainer.on('dragend', (pointer) => {
                 if (this.turnActions[this.localPlayer]) return;
+                // インジケーターはドラッグ終了時にクリア
+                this.clearMoveIndicators();
                 if (cardContainer.hasMoved) {
                     const newPos = this.getNearestGridPosition(cardContainer.x, cardContainer.y);
                     const origCenter = this.getCellCenter(card.col, card.row);
@@ -188,8 +193,10 @@ export class GameScene extends Phaser.Scene {
                         y: origCenter.y,
                         duration: 200,
                         onComplete: () => {
-                            if (!this.isCellOccupied(newPos.col, newPos.row, cardData.id) &&
-                                (newPos.col !== card.col || newPos.row !== card.row)) {
+                            // 斜め移動を禁止：移動先は必ず同じ行または同じ列であること
+                            if (!this.isCellOccupied(newPos.col, newPos.row, card.id) &&
+                                (newPos.col !== card.col || newPos.row !== card.row) &&
+                                (newPos.col === card.col || newPos.row === card.row)) {
                                 this.registerLocalAction({
                                     cardId: card.id,
                                     actionType: 'move',
@@ -203,6 +210,8 @@ export class GameScene extends Phaser.Scene {
 
             cardContainer.on('pointerup', (pointer) => {
                 if (this.turnActions[this.localPlayer]) return;
+                // クリック（ドラッグなし）の場合、移動インジケーターをクリアしてスキルメニューを表示
+                this.clearMoveIndicators();
                 if (!cardContainer.hasMoved) {
                     this.showSkillMenu(card, cardContainer);
                 }
@@ -211,6 +220,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // スキルメニューの表示：カードの右上または左上にオフセットして表示し、上部に「Atk」の文字を追加
+    // また、スキル指定可能なセル（例：敵が存在する横・縦のセル）のインジケーターを追加
     showSkillMenu(card, cardContainer) {
         if (this.skillMenuSprite) {
             this.skillMenuSprite.destroy();
@@ -220,14 +230,19 @@ export class GameScene extends Phaser.Scene {
             this.skillMenuText.destroy();
             this.skillMenuText = null;
         }
+        // 万が一残っている移動インジケーターをクリア
+        this.clearMoveIndicators();
+        // スキル指定可能範囲のインジケーターを表示（敵カードがあるセルのみをハイライト）
+        this.showSkillIndicators(card);
+
         let offsetX = 40, offsetY = -40;
-        if (cardContainer.x > this.cameras.main.centerX) {
+        if (card.container.x > this.cameras.main.centerX) {
             offsetX = -40;
         }
-        const menuX = cardContainer.x + offsetX;
-        const menuY = cardContainer.y + offsetY;
+        const menuX = card.container.x + offsetX;
+        const menuY = card.container.y + offsetY;
         this.skillMenuSprite = this.add.image(menuX, menuY, 'skill');
-        const desiredSize = (this.cellSize - 10) * 0.5;
+        const desiredSize = (this.cellSize * 0.8) * 0.5; // カードサイズの50%
         const scale = desiredSize / this.skillMenuSprite.width;
         this.skillMenuSprite.setScale(scale);
         this.skillMenuSprite.setInteractive();
@@ -247,6 +262,8 @@ export class GameScene extends Phaser.Scene {
         });
 
         this.skillMenuSprite.on('dragend', (pointer) => {
+            // スキルインジケーターはドラッグ終了時にクリア
+            this.clearSkillIndicators();
             const targetPos = this.getNearestGridPosition(this.skillMenuSprite.x, this.skillMenuSprite.y);
             const center = this.getCellCenter(targetPos.col, targetPos.row);
             this.tweens.add({
@@ -277,10 +294,85 @@ export class GameScene extends Phaser.Scene {
                         this.skillMenuText && this.skillMenuText.destroy();
                         this.skillMenuSprite = null;
                         this.skillMenuText = null;
+                        this.clearSkillIndicators();
                     }
                 }
             });
         });
+    }
+
+    // -------------------------------
+    // 移動可能範囲インジケーターの追加
+    // 横方向（同じ行）および縦方向（同じ列）のセルで、かつ空いているセルをハイライトします
+    showMoveIndicators(card) {
+        this.clearMoveIndicators();
+        let indicators = [];
+        // 同じ行の各セル
+        for (let col = 0; col < this.cols; col++) {
+            if (col !== card.col && !this.isCellOccupied(col, card.row, card.id)) {
+                const center = this.getCellCenter(col, card.row);
+                let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0x0000ff, 0.3);
+                indicators.push(rect);
+            }
+        }
+        // 同じ列の各セル
+        for (let row = 0; row < this.rows; row++) {
+            if (row !== card.row && !this.isCellOccupied(card.col, row, card.id)) {
+                const center = this.getCellCenter(card.col, row);
+                let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0x0000ff, 0.3);
+                indicators.push(rect);
+            }
+        }
+        this.moveIndicators = indicators;
+    }
+
+    clearMoveIndicators() {
+        if (this.moveIndicators) {
+            this.moveIndicators.forEach(indicator => indicator.destroy());
+            this.moveIndicators = [];
+        }
+    }
+
+    // -------------------------------
+    // スキル指定可能範囲インジケーターの追加
+    // 敵カードが存在する、同じ行または同じ列のセルをハイライトします
+    showSkillIndicators(card) {
+        this.clearSkillIndicators();
+        let indicators = [];
+        // 同じ行のセル
+        for (let col = 0; col < this.cols; col++) {
+            if (col !== card.col) {
+                let enemy = Object.values(this.cards).find(c =>
+                    c.owner !== card.owner && c.col === col && c.row === card.row && c.hp > 0
+                );
+                if (enemy) {
+                    const center = this.getCellCenter(col, card.row);
+                    let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0xff0000, 0.3);
+                    indicators.push(rect);
+                }
+            }
+        }
+        // 同じ列のセル
+        for (let row = 0; row < this.rows; row++) {
+            if (row !== card.row) {
+                let enemy = Object.values(this.cards).find(c =>
+                    c.owner !== card.owner && c.col === card.col && c.row === row && c.hp > 0
+                );
+                if (enemy) {
+                    const center = this.getCellCenter(card.col, row);
+                    let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0xff0000, 0.3);
+                    indicators.push(rect);
+                }
+            }
+        }
+        this.skillIndicators = indicators;
+    }
+
+    clearSkillIndicators() {
+        if (this.skillIndicators) {
+            this.skillIndicators.forEach(indicator => indicator.destroy());
+            this.skillIndicators = [];
+        }
     }
 
     disableLocalCardInput() {
