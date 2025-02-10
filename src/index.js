@@ -3,7 +3,7 @@ import { LobbyScene } from './scenes/lobbyScene';
 import { GameScene } from './scenes/gameScene';
 import { io } from 'socket.io-client';
 
-let socket = io('http://localhost:3000');
+let socket = io();
 
 const config = {
   type: Phaser.AUTO,
