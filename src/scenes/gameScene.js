@@ -8,6 +8,8 @@ export class GameScene extends Phaser.Scene {
         // インジケーター用配列の初期化
         this.moveIndicators = [];
         this.skillIndicators = [];
+        // 罠（トラップ）用配列の初期化
+        this.traps = [];
     }
 
     init(data) {
@@ -27,10 +29,9 @@ export class GameScene extends Phaser.Scene {
         this.turnReadyStates = { host: false, guest: false };
         this.turnReadyTimer = null;
 
-        // スキル発動用：発動元カードの参照、スキルメニュー画像および上部テキストの参照
-        this.skillSourceCard = null;
-        this.skillMenuSprite = null;
-        this.skillMenuText = null;
+        // スキル発動用：スキルメニュー（今回は攻撃と罠の２種類）
+        this.skillMenuSprites = [];
+        this.skillMenuTexts = [];
     }
 
     preload() {
@@ -59,8 +60,7 @@ export class GameScene extends Phaser.Scene {
         this.startTurn();
     }
 
-    // グリッドは縦7行×横3列（縦長）の構成
-    // セルサイズは60px。ここではグリッドの各セルに背景画像を配置する
+    // グリッドは縦7行×横3列（縦長）で、セルサイズは60px
     setupGrid() {
         this.cols = 3;
         this.rows = 7;
@@ -77,6 +77,8 @@ export class GameScene extends Phaser.Scene {
                 let tile = this.add.image(center.x, center.y, 'tile');
                 // セルサイズに合わせて画像サイズを調整
                 tile.setDisplaySize(this.cellSize, this.cellSize);
+                // グリッドを一番奥に表示
+                tile.setDepth(0);
             }
         }
     }
@@ -108,14 +110,14 @@ export class GameScene extends Phaser.Scene {
         const hostColumns = [0, 1, 2];
 
         const guestStats = [
-            { id: 'guest_0', hp: 3, speed: 9 },
-            { id: 'guest_1', hp: 3, speed: 7 },
-            { id: 'guest_2', hp: 3, speed: 5 }
+            { id: 'guest_0', hp: 3, speed: 3 },
+            { id: 'guest_1', hp: 3, speed: 2 },
+            { id: 'guest_2', hp: 3, speed: 1 }
         ];
         const hostStats = [
-            { id: 'host_0', hp: 3, speed: 10 },
-            { id: 'host_1', hp: 3, speed: 8 },
-            { id: 'host_2', hp: 3, speed: 6 }
+            { id: 'host_0', hp: 3, speed: 4 },
+            { id: 'host_1', hp: 3, speed: 3 },
+            { id: 'host_2', hp: 3, speed: 2 }
         ];
 
         guestStats.forEach((cardStat, index) => {
@@ -134,9 +136,9 @@ export class GameScene extends Phaser.Scene {
     createCard(cardData, col, row) {
         const center = this.getCellCenter(col, row);
         const cardContainer = this.add.container(center.x, center.y);
-        const cardSprite = this.add.image(0, 0, 'ship');
-        // カードはグリッドより一回り小さく表示（ここではセルサイズの80%に設定）
+        // カードはグリッドより一回り小さく表示（セルサイズの80%）
         const desiredCardSize = this.cellSize * 0.8;
+        const cardSprite = this.add.image(0, 0, 'ship');
         cardSprite.setDisplaySize(desiredCardSize, desiredCardSize);
         cardContainer.add(cardSprite);
         const statsText = this.add.text(-this.cellSize / 4, -this.cellSize / 4, `HP:${cardData.hp}\nSPD:${cardData.speed}`, {
@@ -144,6 +146,9 @@ export class GameScene extends Phaser.Scene {
             fill: '#ffffff'
         });
         cardContainer.add(statsText);
+
+        // カードコンテナをグリッドより手前に表示
+        cardContainer.setDepth(2);
 
         const card = {
             id: cardData.id,
@@ -158,7 +163,7 @@ export class GameScene extends Phaser.Scene {
         };
         this.cards[card.id] = card;
 
-        // 自分が操作するカードのみ、入力を有効化
+        // 自分が操作するカードのみ入力有効化
         if (card.owner === this.localPlayer) {
             cardContainer.setSize(desiredCardSize, desiredCardSize);
             cardContainer.setInteractive();
@@ -169,7 +174,7 @@ export class GameScene extends Phaser.Scene {
                 cardContainer.startX = pointer.x;
                 cardContainer.startY = pointer.y;
                 cardContainer.hasMoved = false;
-                // 移動可能なセル（横・縦方向）のインジケーターを表示
+                // 移動可能セル（縦横）のインジケーター表示
                 this.showMoveIndicators(card);
             });
 
@@ -182,7 +187,6 @@ export class GameScene extends Phaser.Scene {
 
             cardContainer.on('dragend', (pointer) => {
                 if (this.turnActions[this.localPlayer]) return;
-                // インジケーターはドラッグ終了時にクリア
                 this.clearMoveIndicators();
                 if (cardContainer.hasMoved) {
                     const newPos = this.getNearestGridPosition(cardContainer.x, cardContainer.y);
@@ -193,7 +197,7 @@ export class GameScene extends Phaser.Scene {
                         y: origCenter.y,
                         duration: 200,
                         onComplete: () => {
-                            // 斜め移動を禁止：移動先は必ず同じ行または同じ列であること
+                            // 斜め移動禁止：縦横のみ移動
                             if (!this.isCellOccupied(newPos.col, newPos.row, card.id) &&
                                 (newPos.col !== card.col || newPos.row !== card.row) &&
                                 (newPos.col === card.col || newPos.row === card.row)) {
@@ -210,104 +214,43 @@ export class GameScene extends Phaser.Scene {
 
             cardContainer.on('pointerup', (pointer) => {
                 if (this.turnActions[this.localPlayer]) return;
-                // クリック（ドラッグなし）の場合、移動インジケーターをクリアしてスキルメニューを表示
                 this.clearMoveIndicators();
                 if (!cardContainer.hasMoved) {
-                    this.showSkillMenu(card, cardContainer);
+                    // スキルメニュー（攻撃・罠の２種類）を表示
+                    this.showSkillMenu(card);
                 }
             });
         }
     }
 
-    // スキルメニューの表示：カードの右上または左上にオフセットして表示し、上部に「Atk」の文字を追加
-    // また、スキル指定可能なセル（例：敵が存在する横・縦のセル）のインジケーターを追加
-    showSkillMenu(card, cardContainer) {
-        if (this.skillMenuSprite) {
-            this.skillMenuSprite.destroy();
-            this.skillMenuSprite = null;
-        }
-        if (this.skillMenuText) {
-            this.skillMenuText.destroy();
-            this.skillMenuText = null;
-        }
-        // 万が一残っている移動インジケーターをクリア
-        this.clearMoveIndicators();
-        // スキル指定可能範囲のインジケーターを表示（敵カードがあるセルのみをハイライト）
-        this.showSkillIndicators(card);
-
-        let offsetX = 40, offsetY = -40;
-        if (card.container.x > this.cameras.main.centerX) {
-            offsetX = -40;
-        }
-        const menuX = card.container.x + offsetX;
-        const menuY = card.container.y + offsetY;
-        this.skillMenuSprite = this.add.image(menuX, menuY, 'skill');
-        const desiredSize = (this.cellSize * 0.8) * 0.5; // カードサイズの50%
-        const scale = desiredSize / this.skillMenuSprite.width;
-        this.skillMenuSprite.setScale(scale);
-        this.skillMenuSprite.setInteractive();
-        this.input.setDraggable(this.skillMenuSprite);
-
-        // 「Atk」テキストをメニューの上部に表示
-        this.skillMenuText = this.add.text(menuX, menuY - (desiredSize / 2) - 5, 'Atk', {
-            fontSize: '12px',
-            fill: '#ffffff'
-        }).setOrigin(0.5);
-
-        this.skillMenuSprite.on('drag', (pointer, dragX, dragY) => {
-            this.skillMenuSprite.x = dragX;
-            this.skillMenuSprite.y = dragY;
-            this.skillMenuText.x = dragX;
-            this.skillMenuText.y = dragY - (desiredSize / 2) - 5;
-        });
-
-        this.skillMenuSprite.on('dragend', (pointer) => {
-            // スキルインジケーターはドラッグ終了時にクリア
-            this.clearSkillIndicators();
-            const targetPos = this.getNearestGridPosition(this.skillMenuSprite.x, this.skillMenuSprite.y);
-            const center = this.getCellCenter(targetPos.col, targetPos.row);
-            this.tweens.add({
-                targets: [this.skillMenuSprite, this.skillMenuText],
-                x: center.x,
-                y: center.y - (desiredSize / 2) - 5,
-                duration: 200,
-                onComplete: () => {
-                    this.registerLocalAction({
-                        cardId: card.id,
-                        actionType: 'skill',
-                        destination: { col: targetPos.col, row: targetPos.row }
-                    });
-                    this.skillMenuSprite.destroy();
-                    this.skillMenuText.destroy();
-                    this.skillMenuSprite = null;
-                    this.skillMenuText = null;
+    // スキル指定可能範囲：自身からマンハッタン距離2以内のセルをハイライト
+    showSkillIndicators(card) {
+        this.clearSkillIndicators();
+        let indicators = [];
+        for (let col = 0; col < this.cols; col++) {
+            for (let row = 0; row < this.rows; row++) {
+                if (col === card.col && row === card.row) continue;
+                if (Math.abs(col - card.col) + Math.abs(row - card.row) <= 2) {
+                    const center = this.getCellCenter(col, row);
+                    let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0xff0000, 0.3);
+                    indicators.push(rect);
                 }
-            });
-        });
-
-        // メニュー以外がクリックされた場合、メニューを破棄する処理（once リスナー）
-        this.time.delayedCall(1, () => {
-            this.input.once('pointerdown', (pointer, currentlyOver) => {
-                if (!currentlyOver || !currentlyOver.includes(this.skillMenuSprite)) {
-                    if (this.skillMenuSprite) {
-                        this.skillMenuSprite.destroy();
-                        this.skillMenuText && this.skillMenuText.destroy();
-                        this.skillMenuSprite = null;
-                        this.skillMenuText = null;
-                        this.clearSkillIndicators();
-                    }
-                }
-            });
-        });
+            }
+        }
+        this.skillIndicators = indicators;
     }
 
-    // -------------------------------
-    // 移動可能範囲インジケーターの追加
-    // 横方向（同じ行）および縦方向（同じ列）のセルで、かつ空いているセルをハイライトします
+    clearSkillIndicators() {
+        if (this.skillIndicators) {
+            this.skillIndicators.forEach(indicator => indicator.destroy());
+            this.skillIndicators = [];
+        }
+    }
+
+    // 移動可能範囲：同じ行・列で空いているセルを青色でハイライト
     showMoveIndicators(card) {
         this.clearMoveIndicators();
         let indicators = [];
-        // 同じ行の各セル
         for (let col = 0; col < this.cols; col++) {
             if (col !== card.col && !this.isCellOccupied(col, card.row, card.id)) {
                 const center = this.getCellCenter(col, card.row);
@@ -315,7 +258,6 @@ export class GameScene extends Phaser.Scene {
                 indicators.push(rect);
             }
         }
-        // 同じ列の各セル
         for (let row = 0; row < this.rows; row++) {
             if (row !== card.row && !this.isCellOccupied(card.col, row, card.id)) {
                 const center = this.getCellCenter(card.col, row);
@@ -330,48 +272,6 @@ export class GameScene extends Phaser.Scene {
         if (this.moveIndicators) {
             this.moveIndicators.forEach(indicator => indicator.destroy());
             this.moveIndicators = [];
-        }
-    }
-
-    // -------------------------------
-    // スキル指定可能範囲インジケーターの追加
-    // 敵カードが存在する、同じ行または同じ列のセルをハイライトします
-    showSkillIndicators(card) {
-        this.clearSkillIndicators();
-        let indicators = [];
-        // 同じ行のセル
-        for (let col = 0; col < this.cols; col++) {
-            if (col !== card.col) {
-                let enemy = Object.values(this.cards).find(c =>
-                    c.owner !== card.owner && c.col === col && c.row === card.row && c.hp > 0
-                );
-                if (enemy) {
-                    const center = this.getCellCenter(col, card.row);
-                    let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0xff0000, 0.3);
-                    indicators.push(rect);
-                }
-            }
-        }
-        // 同じ列のセル
-        for (let row = 0; row < this.rows; row++) {
-            if (row !== card.row) {
-                let enemy = Object.values(this.cards).find(c =>
-                    c.owner !== card.owner && c.col === card.col && c.row === row && c.hp > 0
-                );
-                if (enemy) {
-                    const center = this.getCellCenter(card.col, row);
-                    let rect = this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0xff0000, 0.3);
-                    indicators.push(rect);
-                }
-            }
-        }
-        this.skillIndicators = indicators;
-    }
-
-    clearSkillIndicators() {
-        if (this.skillIndicators) {
-            this.skillIndicators.forEach(indicator => indicator.destroy());
-            this.skillIndicators = [];
         }
     }
 
@@ -391,7 +291,139 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    // ターン開始の準備通信
+    // スキルメニューの表示：攻撃と罠の2種類のスキルアイコンを表示
+    showSkillMenu(card) {
+        this.clearSkillMenu();
+        // 移動インジケーターはクリアし、スキル範囲インジケーターを表示
+        this.clearMoveIndicators();
+        this.showSkillIndicators(card);
+
+        // 攻撃スキルのメニュー（右上）
+        let atkOffsetX = 40, atkOffsetY = -40;
+        let atkX = card.container.x + atkOffsetX;
+        let atkY = card.container.y + atkOffsetY;
+        let atkSprite = this.add.image(atkX, atkY, 'skill');
+        const desiredSize = (this.cellSize * 0.8) * 0.5; // カードサイズの50%
+        const atkScale = desiredSize / atkSprite.width;
+        atkSprite.setScale(atkScale);
+        atkSprite.setInteractive();
+        atkSprite.setDepth(3);
+        let atkText = this.add.text(atkX, atkY - (desiredSize / 2) - 5, 'Atk', {
+            fontSize: '12px',
+            fill: '#ffffff'
+        }).setOrigin(0.5);
+        atkText.setDepth(3);
+
+        // 罠スキルのメニュー（左上）
+        let trapOffsetX = -40, trapOffsetY = -40;
+        let trapX = card.container.x + trapOffsetX;
+        let trapY = card.container.y + trapOffsetY;
+        let trapSprite = this.add.image(trapX, trapY, 'skill');
+        const trapScale = desiredSize / trapSprite.width;
+        trapSprite.setScale(trapScale);
+        trapSprite.setInteractive();
+        trapSprite.setDepth(3);
+        let trapText = this.add.text(trapX, trapY - (desiredSize / 2) - 5, 'Trap', {
+            fontSize: '12px',
+            fill: '#ffffff'
+        }).setOrigin(0.5);
+        trapText.setDepth(3);
+
+        // メニューの参照を保存
+        this.skillMenuSprites.push(atkSprite, trapSprite);
+        this.skillMenuTexts.push(atkText, trapText);
+
+        // ドラッグ可能に設定
+        this.input.setDraggable(atkSprite);
+        this.input.setDraggable(trapSprite);
+
+        atkSprite.on('drag', (pointer, dragX, dragY) => {
+            atkSprite.x = dragX;
+            atkSprite.y = dragY;
+            atkText.x = dragX;
+            atkText.y = dragY - (desiredSize / 2) - 5;
+        });
+        trapSprite.on('drag', (pointer, dragX, dragY) => {
+            trapSprite.x = dragX;
+            trapSprite.y = dragY;
+            trapText.x = dragX;
+            trapText.y = dragY - (desiredSize / 2) - 5;
+        });
+
+        // 共通のドロップ処理：グリッド内ならスナップし、該当スキルのアクションを登録
+        const handleSkillDrop = (sprite, skillSubtype) => {
+            // グリッド範囲外ならキャンセル
+            if (sprite.x < this.gridOrigin.x || sprite.x > this.gridOrigin.x + this.cols * this.cellSize ||
+                sprite.y < this.gridOrigin.y || sprite.y > this.gridOrigin.y + this.rows * this.cellSize) {
+                this.clearSkillMenu();
+                this.clearSkillIndicators();
+                return;
+            }
+            const targetPos = this.getNearestGridPosition(sprite.x, sprite.y);
+            const center = this.getCellCenter(targetPos.col, targetPos.row);
+            this.tweens.add({
+                // targets: [atkSprite, trapSprite, atkText, trapText],
+                targets: [sprite, atkText, trapText],
+                x: center.x,
+                y: center.y,
+                duration: 200,
+                onComplete: () => {
+                    this.registerLocalAction({
+                        cardId: card.id,
+                        actionType: 'skill',
+                        skillSubtype: skillSubtype,
+                        destination: { col: targetPos.col, row: targetPos.row }
+                    });
+                    this.clearSkillMenu();
+                }
+            });
+        };
+
+        atkSprite.on('dragend', () => {
+            handleSkillDrop(atkSprite, 'atk');
+        });
+        trapSprite.on('dragend', () => {
+            handleSkillDrop(trapSprite, 'trap');
+        });
+
+        // クリックでメニュー外ならキャンセル
+        this.time.delayedCall(1, () => {
+            this.input.once('pointerdown', (pointer, currentlyOver) => {
+                if (!currentlyOver || (!currentlyOver.includes(atkSprite) && !currentlyOver.includes(trapSprite))) {
+                    this.clearSkillMenu();
+                    this.clearSkillIndicators();
+                }
+            });
+        });
+    }
+
+    clearSkillMenu() {
+        if (this.skillMenuSprites.length > 0) {
+            this.skillMenuSprites.forEach(sprite => sprite.destroy());
+            this.skillMenuSprites = [];
+        }
+        if (this.skillMenuTexts.length > 0) {
+            this.skillMenuTexts.forEach(text => text.destroy());
+            this.skillMenuTexts = [];
+        }
+    }
+
+    // 罠判定：カードが罠セルに到達したらダメージを与え、罠を除去
+    checkForTrap(card) {
+        const trapIndex = this.traps.findIndex(trap => trap.col === card.col && trap.row === card.row);
+        if (trapIndex !== -1) {
+            const trap = this.traps[trapIndex];
+            card.sprite.setTint(0xff0000);
+            this.time.delayedCall(100, () => {
+                card.sprite.clearTint();
+                card.hp -= 1;
+                card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}`);
+            });
+            trap.sprite.destroy();
+            this.traps.splice(trapIndex, 1);
+        }
+    }
+
     sendTurnReady() {
         if (this.turnActions[this.localPlayer]) {
             if (this.turnReadyTimer) {
@@ -420,7 +452,6 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    // ターン開始要求
     startTurn() {
         console.log("Starting turn coordination");
         this.turnActions = {};
@@ -434,7 +465,6 @@ export class GameScene extends Phaser.Scene {
         this.sendTurnReady();
     }
 
-    // ターン行動の登録（1ターン1回）
     registerLocalAction(action) {
         if (this.turnActions[this.localPlayer]) return;
         this.turnActions[this.localPlayer] = action;
@@ -450,7 +480,6 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    // 複数の tween を順次実行するヘルパー関数
     playTweenSequence(tweenConfigs, onComplete) {
         const sequence = [...tweenConfigs];
         const playNext = () => {
@@ -469,7 +498,6 @@ export class GameScene extends Phaser.Scene {
         playNext();
     }
 
-    // ターン解決（ホスト側で実行）
     resolveTurn() {
         const hostAction = this.turnActions['host'];
         const guestAction = this.turnActions['guest'];
@@ -498,6 +526,8 @@ export class GameScene extends Phaser.Scene {
                     onComplete: () => {
                         card.col = action.destination.col;
                         card.row = action.destination.row;
+                        // 移動先で罠判定
+                        this.checkForTrap(card);
                     }
                 });
                 animationCommands.push({
@@ -507,46 +537,66 @@ export class GameScene extends Phaser.Scene {
                     duration: 500
                 });
             } else if (action.actionType === 'skill') {
-                const targetGrid = action.destination;
-                const enemyCard = Object.values(this.cards).find(c =>
-                    c.owner !== card.owner &&
-                    c.col === targetGrid.col &&
-                    c.row === targetGrid.row &&
-                    c.hp > 0
-                );
-                if (enemyCard) {
-                    const sourceCenter = this.getCellCenter(card.col, card.row);
-                    const targetCenter = this.getCellCenter(enemyCard.col, enemyCard.row);
-                    // 弾のアニメーション（黄色い弾）
-                    let bullet = this.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
-                    tweenConfigs.push({
-                        targets: bullet,
-                        x: targetCenter.x,
-                        y: targetCenter.y,
-                        duration: 300,
-                        onComplete: () => {
-                            bullet.destroy();
-                            // 敵カードの sprite を赤く点滅させる
-                            enemyCard.sprite.setTint(0xff0000);
-                            this.time.delayedCall(100, () => {
-                                enemyCard.sprite.clearTint();
-                                enemyCard.hp -= 1;
-                                enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
-                            });
-                        }
+                if (action.skillSubtype === 'atk') {
+                    const targetGrid = action.destination;
+                    const enemyCard = Object.values(this.cards).find(c =>
+                        c.owner !== card.owner &&
+                        c.col === targetGrid.col &&
+                        c.row === targetGrid.row &&
+                        c.hp > 0
+                    );
+                    if (enemyCard) {
+                        const sourceCenter = this.getCellCenter(card.col, card.row);
+                        const targetCenter = this.getCellCenter(enemyCard.col, enemyCard.row);
+                        let bullet = this.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
+                        tweenConfigs.push({
+                            targets: bullet,
+                            x: targetCenter.x,
+                            y: targetCenter.y,
+                            duration: 300,
+                            onComplete: () => {
+                                bullet.destroy();
+                                enemyCard.sprite.setTint(0xff0000);
+                                this.time.delayedCall(100, () => {
+                                    enemyCard.sprite.clearTint();
+                                    enemyCard.hp -= 1;
+                                    enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                                });
+                            }
+                        });
+                        animationCommands.push({
+                            type: 'skill',
+                            sourceCardId: card.id,
+                            targetCardId: enemyCard.id,
+                            bulletDuration: 300,
+                            flashDuration: 100
+                        });
+                    }
+                } else if (action.skillSubtype === 'trap') {
+                    const targetGrid = action.destination;
+                    const center = this.getCellCenter(targetGrid.col, targetGrid.row);
+                    // 罠を配置（カードより奥に表示）
+                    let trapSprite = this.add.image(center.x, center.y, 'skill');
+                    trapSprite.setDisplaySize(this.cellSize, this.cellSize);
+                    trapSprite.setDepth(1);
+                    // オプション：フェードインアニメーション
+                    this.tweens.add({
+                        targets: trapSprite,
+                        alpha: { from: 0, to: 1 },
+                        duration: 300
                     });
+                    // 罠をステートに記録
+                    this.traps.push({ col: targetGrid.col, row: targetGrid.row, sprite: trapSprite });
                     animationCommands.push({
-                        type: 'skill',
-                        sourceCardId: card.id,
-                        targetCardId: enemyCard.id,
-                        bulletDuration: 300,
-                        flashDuration: 100
+                        type: 'trap',
+                        cardId: card.id,
+                        destination: targetGrid,
+                        duration: 300
                     });
                 }
             }
         });
 
-        // ホスト側でアニメーション実行後、"turnAnimation" を送信
         this.playTweenSequence(tweenConfigs, () => {
             const turnResult = { state: {} };
             Object.values(this.cards).forEach(card => {
@@ -610,6 +660,18 @@ export class GameScene extends Phaser.Scene {
                         }
                     });
                 }
+            } else if (cmd.type === 'trap') {
+                // ゲスト側も罠を配置
+                const center = this.getCellCenter(cmd.destination.col, cmd.destination.row);
+                let trapSprite = this.add.image(center.x, center.y, 'skill');
+                trapSprite.setDisplaySize(this.cellSize, this.cellSize);
+                trapSprite.setDepth(1);
+                this.tweens.add({
+                    targets: trapSprite,
+                    alpha: { from: 0, to: 1 },
+                    duration: cmd.duration
+                });
+                this.traps.push({ col: cmd.destination.col, row: cmd.destination.row, sprite: trapSprite });
             }
         });
         this.playTweenSequence(tweenConfigs, () => {
@@ -627,7 +689,6 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    // 通信メッセージ処理
     handleGameMessage(event) {
         const message = event.detail;
         const parsed = typeof message === 'string' ? JSON.parse(message) : message;
