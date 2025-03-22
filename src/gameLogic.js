@@ -61,16 +61,17 @@ export class GameLogic {
         cardSprite.setDisplaySize(desiredCardSize, desiredCardSize);
         cardContainer.add(cardSprite);
 
-        // カードステータス表示テキスト
+        // カードステータス表示テキスト（HP, SPD に加え隠密度も表示）
         const statsText = this.scene.add.text(
             -this.scene.cellSize / 4, -this.scene.cellSize / 4,
-            `HP:${cardData.hp}\nSPD:${cardData.speed}`,
+            `HP:${cardData.hp}\nSPD:${cardData.speed}\nST:${3}`,
             { fontSize: '12px', fill: '#ffffff' }
         );
         cardContainer.add(statsText);
         cardContainer.setDepth(2);
 
         // カードオブジェクト生成（状態とUIの両方を管理）
+        // 隠密機能追加：初期隠密値は 3 とする
         const card = {
             id: cardData.id,
             owner: cardData.id.startsWith('host') ? 'host' : 'guest',
@@ -78,11 +79,13 @@ export class GameLogic {
             speed: cardData.speed,
             col,
             row,
+            stealth: 3, // 初期隠密値
             container: cardContainer,
             sprite: cardSprite,
             statsText
         };
         this.cards[card.id] = card;
+        this.updateCardStatsText(card);
 
         // 自分のカードの場合、入力イベントを登録
         if (card.owner === this.localPlayer) {
@@ -91,6 +94,8 @@ export class GameLogic {
             this.scene.input.setDraggable(cardContainer);
             this.setupCardInputEvents(card);
         }
+        // 初回は表示更新（相手カードは隠密状態なら非表示）
+        this.updateCardVisibility();
     }
 
     setupCardInputEvents(card) {
@@ -277,7 +282,9 @@ export class GameLogic {
                                 this.scene.time.delayedCall(100, () => {
                                     enemyCard.sprite.clearTint();
                                     enemyCard.hp -= 1;
-                                    enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                                    // ダメージによる隠密低下
+                                    enemyCard.stealth -= 1;
+                                    this.updateCardStatsText(enemyCard);
                                 });
                             }
                         });
@@ -318,7 +325,8 @@ export class GameLogic {
                 turnResult.state[card.id] = {
                     col: card.col,
                     row: card.row,
-                    hp: card.hp
+                    hp: card.hp,
+                    stealth: card.stealth
                 };
             });
             sendGameMessage(JSON.stringify({
@@ -326,6 +334,9 @@ export class GameLogic {
                 commands: animationCommands,
                 finalState: turnResult.state
             }));
+            // ターン終了時、隠密チェック（敵の正面近くにいるか）を実施
+            this.updateStealthProximity();
+            this.updateCardVisibility();
             this.checkGameOver();
             if (!this.gameOver) this.startTurn();
         });
@@ -367,7 +378,8 @@ export class GameLogic {
                             this.scene.time.delayedCall(cmd.flashDuration, () => {
                                 enemyCard.sprite.clearTint();
                                 enemyCard.hp -= 1;
-                                enemyCard.statsText.setText(`HP:${enemyCard.hp}\nSPD:${enemyCard.speed}`);
+                                enemyCard.stealth -= 1;
+                                this.updateCardStatsText(enemyCard);
                             });
                         }
                     });
@@ -385,7 +397,9 @@ export class GameLogic {
                 this.traps.push({ col: cmd.destination.col, row: cmd.destination.row, sprite: trapSprite });
             }
         });
-        this.scene.playTweenSequence(tweenConfigs, () => this.updateBoardState(finalState));
+        this.scene.playTweenSequence(tweenConfigs, () => {
+            this.updateBoardState(finalState);
+        });
     }
 
     updateBoardState(state) {
@@ -396,7 +410,8 @@ export class GameLogic {
                 card.col = cardState.col;
                 card.row = cardState.row;
                 card.hp = cardState.hp;
-                card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}`);
+                card.stealth = cardState.stealth;
+                this.updateCardStatsText(card);
                 const center = this.scene.getCellCenter(card.col, card.row);
                 this.scene.tweens.add({
                     targets: card.container,
@@ -406,8 +421,54 @@ export class GameLogic {
                 });
             }
         });
+        // ターン終了時の隠密チェック
+        this.updateStealthProximity();
+        this.updateCardVisibility();
         this.checkGameOver();
         if (!this.gameOver) this.startTurn();
+    }
+
+    /**
+     * 敵カードの正面（ホスト：上、ゲスト：下）の近くにいる場合、対象カードの隠密値を低下させる
+     */
+    updateStealthProximity() {
+        Object.values(this.cards).forEach(card => {
+            // 敵側カードを調べる
+            const enemyOwner = card.owner === 'host' ? 'guest' : 'host';
+            Object.values(this.cards).forEach(enemy => {
+                if (enemy.owner === enemyOwner) {
+                    // 敵カードの正面セルを計算
+                    const frontRow = enemy.owner === 'host' ? enemy.row - 1 : enemy.row + 1;
+                    if (card.col === enemy.col && card.row === frontRow) {
+                        // 複数の敵が正面にいれば複数回低下する可能性あり
+                        card.stealth -= 1;
+                        this.updateCardStatsText(card);
+                    }
+                }
+            });
+        });
+    }
+
+    /**
+     * 各カードのUI表示（隠密状態の場合は相手には非表示）
+     */
+    updateCardVisibility() {
+        Object.values(this.cards).forEach(card => {
+            if (card.owner !== this.localPlayer) {
+                // 隠密値が正なら非表示、0以下なら表示
+                card.container.setVisible(card.stealth <= 0);
+            } else {
+                // 自分のカードは常に表示
+                card.container.setVisible(true);
+            }
+        });
+    }
+
+    /**
+     * カードのステータス表示（HP, SPD, 隠密値）を更新
+     */
+    updateCardStatsText(card) {
+        card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}\nST:${card.stealth}`);
     }
 
     checkForTrap(card) {
@@ -418,7 +479,8 @@ export class GameLogic {
             this.scene.time.delayedCall(100, () => {
                 card.sprite.clearTint();
                 card.hp -= 1;
-                card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}`);
+                card.stealth -= 1; // 罠による隠密低下
+                this.updateCardStatsText(card);
             });
             trap.sprite.destroy();
             this.traps.splice(trapIndex, 1);
