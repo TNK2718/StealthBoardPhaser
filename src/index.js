@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import { LobbyScene } from './scenes/lobbyScene';
-import { GameScene } from './scenes/gameScene';
+import { LobbyScene } from './lobby_scene/lobbyScene';
+import { GameScene } from './game_scene/gameScene';
 import { io } from 'socket.io-client';
 
 let socket = io();

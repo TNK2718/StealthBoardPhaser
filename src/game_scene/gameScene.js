@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GameLogic } from '../gameLogic';
+import { GameLogic } from './gameLogic';
 
 export class GameScene extends Phaser.Scene {
     constructor() {

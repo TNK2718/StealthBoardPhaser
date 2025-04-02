@@ -1,4 +1,4 @@
-import { sendGameMessage } from './webrtc';
+import { sendGameMessage } from '../webrtc';
 
 export class GameLogic {
     constructor(scene, { isMaster, localPlayer, remotePlayer }) {

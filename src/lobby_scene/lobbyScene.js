@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { io } from 'socket.io-client';
 import { initWebRTC, onConnectionReady, sendGameMove } from '../webrtc';
-import { GameScene } from './gameScene';
+import { GameScene } from '../game_scene/gameScene';
 
 export class LobbyScene extends Phaser.Scene {
     constructor() {
