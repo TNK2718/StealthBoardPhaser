@@ -1,28 +1,24 @@
 import { sendGameMessage } from '../webrtc';
 
 export class GameLogic {
-    constructor(scene, { isMaster, localPlayer, remotePlayer }) {
-        // UIシーンへの参照を保持
-        this.scene = scene;
-        this.isMaster = isMaster;
-        this.localPlayer = localPlayer;
-        this.remotePlayer = remotePlayer;
-
+    constructor() {
         // ゲーム状態の初期化
         this.cards = {};
         this.turnActions = {};
         this.turnInProgress = false;
         this.gameOver = false;
         this.turnReadyStates = { host: false, guest: false };
-        this.turnReadyTimer = null;
         this.traps = [];
     }
 
     // ---------------------------
-    // カード生成・管理
+    // カード初期化・管理
     // ---------------------------
 
-    createCards() {
+    initializeCards(localPlayer, remotePlayer) {
+        this.localPlayer = localPlayer;
+        this.remotePlayer = remotePlayer;
+
         // カード配置用カラム
         const guestColumns = [0, 1, 2];
         const hostColumns = [0, 1, 2];
@@ -40,38 +36,23 @@ export class GameLogic {
             { id: 'host_2', hp: 3, speed: 2 }
         ];
 
+        const cards = [];
+
         // ゲスト側：上段（row = 0）
         guestStats.forEach((cardStat, index) => {
-            this.createCard(cardStat, guestColumns[index], 0);
+            cards.push(this.createCardData(cardStat, guestColumns[index], 0));
         });
 
         // ホスト側：下段（row = rows-1）
         hostStats.forEach((cardStat, index) => {
-            this.createCard(cardStat, hostColumns[index], this.scene.rows - 1);
+            cards.push(this.createCardData(cardStat, hostColumns[index], 6)); // rows-1 = 6
         });
+
+        return cards;
     }
 
-    createCard(cardData, col, row) {
-        const center = this.scene.getCellCenter(col, row);
-        const cardContainer = this.scene.add.container(center.x, center.y);
-
-        // カードのサイズはセルサイズの80%
-        const desiredCardSize = this.scene.cellSize * 0.8;
-        const cardSprite = this.scene.add.image(0, 0, 'ship');
-        cardSprite.setDisplaySize(desiredCardSize, desiredCardSize);
-        cardContainer.add(cardSprite);
-
-        // カードステータス表示テキスト（HP, SPD に加え隠密度も表示）
-        const statsText = this.scene.add.text(
-            -this.scene.cellSize / 4, -this.scene.cellSize / 4,
-            `HP:${cardData.hp}\nSPD:${cardData.speed}\nST:${3}`,
-            { fontSize: '12px', fill: '#ffffff' }
-        );
-        cardContainer.add(statsText);
-        cardContainer.setDepth(2);
-
-        // カードオブジェクト生成（状態とUIの両方を管理）
-        // 隠密機能追加：初期隠密値は 3 とする
+    createCardData(cardData, col, row) {
+        // カードのデータモデルのみを作成
         const card = {
             id: cardData.id,
             owner: cardData.id.startsWith('host') ? 'host' : 'guest',
@@ -79,78 +60,10 @@ export class GameLogic {
             speed: cardData.speed,
             col,
             row,
-            stealth: 3, // 初期隠密値
-            container: cardContainer,
-            sprite: cardSprite,
-            statsText
+            stealth: 3 // 初期隠密値
         };
         this.cards[card.id] = card;
-        this.updateCardStatsText(card);
-
-        // 自分のカードの場合、入力イベントを登録
-        if (card.owner === this.localPlayer) {
-            cardContainer.setSize(desiredCardSize, desiredCardSize);
-            cardContainer.setInteractive();
-            this.scene.input.setDraggable(cardContainer);
-            this.setupCardInputEvents(card);
-        }
-        // 初回は表示更新（相手カードは隠密状態なら非表示）
-        this.updateCardVisibility();
-    }
-
-    setupCardInputEvents(card) {
-        const container = card.container;
-
-        container.on('pointerdown', (pointer) => {
-            if (this.turnActions[this.localPlayer]) return;
-            container.startX = pointer.x;
-            container.startY = pointer.y;
-            container.hasMoved = false;
-            this.scene.showMoveIndicators(card);
-        });
-
-        container.on('drag', (pointer, dragX, dragY) => {
-            if (this.turnActions[this.localPlayer]) return;
-            container.hasMoved = true;
-            container.x = dragX;
-            container.y = dragY;
-        });
-
-        container.on('dragend', (pointer) => {
-            if (this.turnActions[this.localPlayer]) return;
-            this.scene.clearMoveIndicators();
-            if (container.hasMoved) {
-                const newPos = this.scene.getNearestGridPosition(container.x, container.y);
-                const origCenter = this.scene.getCellCenter(card.col, card.row);
-                this.scene.tweens.add({
-                    targets: container,
-                    x: origCenter.x,
-                    y: origCenter.y,
-                    duration: 200,
-                    onComplete: () => {
-                        // 移動は縦横のみ許可かつセルが空の場合に登録
-                        if (!this.isCellOccupied(newPos.col, newPos.row, card.id) &&
-                            (newPos.col !== card.col || newPos.row !== card.row) &&
-                            (newPos.col === card.col || newPos.row === card.row)) {
-                            this.registerLocalAction({
-                                cardId: card.id,
-                                actionType: 'move',
-                                destination: { col: newPos.col, row: newPos.row }
-                            });
-                        }
-                    }
-                });
-            }
-        });
-
-        container.on('pointerup', () => {
-            if (this.turnActions[this.localPlayer]) return;
-            this.scene.clearMoveIndicators();
-            if (!container.hasMoved) {
-                // クリック時はスキルメニューを表示
-                this.scene.showSkillMenu(card);
-            }
-        });
+        return card;
     }
 
     /**
@@ -166,63 +79,32 @@ export class GameLogic {
     // ターン・アクション処理
     // ---------------------------
 
-    registerLocalAction(action) {
-        if (this.turnActions[this.localPlayer]) return;
-        this.turnActions[this.localPlayer] = action;
-        this.scene.turnStatusText.setText("Waiting for opponent...");
-        this.scene.disableLocalCardInput();
-
-        if (!this.isMaster) {
-            sendGameMessage(JSON.stringify({ type: 'playerAction', action }));
-        } else {
-            if (this.turnActions[this.remotePlayer]) {
-                this.resolveTurn();
-            }
-        }
+    registerAction(player, action) {
+        if (this.turnActions[player]) return false;
+        this.turnActions[player] = action;
+        return true;
     }
 
-    sendTurnReady() {
-        if (this.turnActions[this.localPlayer]) {
-            if (this.turnReadyTimer) {
-                clearTimeout(this.turnReadyTimer);
-                this.turnReadyTimer = null;
-            }
-            return;
-        }
-        sendGameMessage(JSON.stringify({ type: 'turnReady', from: this.localPlayer }));
-        if (!this.isMaster) {
-            if (this.turnReadyTimer) clearTimeout(this.turnReadyTimer);
-            this.turnReadyTimer = this.scene.time.delayedCall(3000, () => this.sendTurnReady());
-        }
+    setTurnReadyState(player, isReady) {
+        this.turnReadyStates[player] = isReady;
+        return this.turnReadyStates.host && this.turnReadyStates.guest;
     }
 
-    actualStartTurn() {
-        console.log("Turn started");
-        this.scene.turnStatusText.setText("Your turn: choose an action");
-        this.scene.enableLocalCardInput();
-        if (this.turnReadyTimer) {
-            clearTimeout(this.turnReadyTimer);
-            this.turnReadyTimer = null;
-        }
-    }
-
-    startTurn() {
-        console.log("Starting turn coordination");
+    resetTurn() {
         this.turnActions = {};
         this.turnInProgress = true;
         this.turnReadyStates = { host: false, guest: false };
-        this.scene.disableLocalCardInput();
-        this.scene.turnStatusText.setText("Waiting for opponent to be ready...");
-        if (this.isMaster) this.turnReadyStates.host = true;
-        this.sendTurnReady();
     }
 
-    resolveTurn() {
+    getCardById(cardId) {
+        return this.cards[cardId];
+    }
+
+    processActionPair() {
         const hostAction = this.turnActions['host'];
         const guestAction = this.turnActions['guest'];
         if (!hostAction || !guestAction) {
-            console.log("Waiting for both actions");
-            return;
+            return null;
         }
 
         // 速度の高いカードからアクション実行
@@ -232,34 +114,30 @@ export class GameLogic {
             return cardB.speed - cardA.speed;
         });
 
-        const tweenConfigs = [];
         const animationCommands = [];
+        const updatedCards = {};
 
         actions.forEach(action => {
             const card = this.cards[action.cardId];
             if (action.actionType === 'move') {
-                const newCenter = this.scene.getCellCenter(action.destination.col, action.destination.row);
-                tweenConfigs.push({
-                    targets: card.container,
-                    x: newCenter.x,
-                    y: newCenter.y,
-                    duration: 500,
-                    onComplete: () => {
-                        card.col = action.destination.col;
-                        card.row = action.destination.row;
-                        // 移動先で罠チェック
-                        this.checkForTrap(card);
-                    }
-                });
+                // 移動アクション
+                card.col = action.destination.col;
+                card.row = action.destination.row;
+
+                // 移動コマンドを記録
                 animationCommands.push({
                     type: 'move',
                     cardId: card.id,
                     destination: action.destination,
                     duration: 500
                 });
+
+                // 移動先で罠チェック
+                this.checkForTrap(card, animationCommands);
+
             } else if (action.actionType === 'skill') {
                 if (action.skillSubtype === 'atk') {
-                    // 攻撃スキル：対象の敵カードを検索
+                    // 攻撃スキル
                     const targetGrid = action.destination;
                     const enemyCard = Object.values(this.cards).find(c =>
                         c.owner !== card.owner &&
@@ -267,27 +145,13 @@ export class GameLogic {
                         c.row === targetGrid.row &&
                         c.hp > 0
                     );
+
                     if (enemyCard) {
-                        const sourceCenter = this.scene.getCellCenter(card.col, card.row);
-                        const targetCenter = this.scene.getCellCenter(enemyCard.col, enemyCard.row);
-                        const bullet = this.scene.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
-                        tweenConfigs.push({
-                            targets: bullet,
-                            x: targetCenter.x,
-                            y: targetCenter.y,
-                            duration: 300,
-                            onComplete: () => {
-                                bullet.destroy();
-                                enemyCard.sprite.setTint(0xff0000);
-                                this.scene.time.delayedCall(100, () => {
-                                    enemyCard.sprite.clearTint();
-                                    enemyCard.hp -= 1;
-                                    // ダメージによる隠密低下
-                                    enemyCard.stealth -= 1;
-                                    this.updateCardStatsText(enemyCard);
-                                });
-                            }
-                        });
+                        // ダメージと隠密値低下を適用
+                        enemyCard.hp -= 1;
+                        enemyCard.stealth -= 1;
+
+                        // 攻撃アニメーションコマンドを記録
                         animationCommands.push({
                             type: 'skill',
                             sourceCardId: card.id,
@@ -297,18 +161,11 @@ export class GameLogic {
                         });
                     }
                 } else if (action.skillSubtype === 'trap') {
-                    // 罠スキル：グリッド上に罠を配置
+                    // 罠スキル
                     const targetGrid = action.destination;
-                    const center = this.scene.getCellCenter(targetGrid.col, targetGrid.row);
-                    const trapSprite = this.scene.add.image(center.x, center.y, 'skill');
-                    trapSprite.setDisplaySize(this.scene.cellSize, this.scene.cellSize);
-                    trapSprite.setDepth(1);
-                    this.scene.tweens.add({
-                        targets: trapSprite,
-                        alpha: { from: 0, to: 1 },
-                        duration: 300
-                    });
-                    this.traps.push({ col: targetGrid.col, row: targetGrid.row, sprite: trapSprite });
+                    this.traps.push({ col: targetGrid.col, row: targetGrid.row });
+
+                    // 罠設置アニメーションコマンドを記録
                     animationCommands.push({
                         type: 'trap',
                         cardId: card.id,
@@ -317,119 +174,56 @@ export class GameLogic {
                     });
                 }
             }
+
+            // 更新されたカード情報を記録
+            updatedCards[card.id] = { ...card };
         });
 
-        this.scene.playTweenSequence(tweenConfigs, () => {
-            const turnResult = { state: {} };
-            Object.values(this.cards).forEach(card => {
-                turnResult.state[card.id] = {
-                    col: card.col,
-                    row: card.row,
-                    hp: card.hp,
-                    stealth: card.stealth
-                };
-            });
-            sendGameMessage(JSON.stringify({
-                type: 'turnAnimation',
-                commands: animationCommands,
-                finalState: turnResult.state
-            }));
-            // ターン終了時、隠密チェック（敵の正面近くにいるか）を実施
-            this.updateStealthProximity();
-            this.updateCardVisibility();
-            this.checkGameOver();
-            if (!this.gameOver) this.startTurn();
-        });
-    }
-
-    playTurnAnimation(commands, finalState) {
-        const tweenConfigs = [];
-        commands.forEach(cmd => {
-            if (cmd.type === 'move') {
-                const card = this.cards[cmd.cardId];
-                if (card) {
-                    const newCenter = this.scene.getCellCenter(cmd.destination.col, cmd.destination.row);
-                    tweenConfigs.push({
-                        targets: card.container,
-                        x: newCenter.x,
-                        y: newCenter.y,
-                        duration: cmd.duration,
-                        onComplete: () => {
-                            card.col = cmd.destination.col;
-                            card.row = cmd.destination.row;
-                        }
-                    });
-                }
-            } else if (cmd.type === 'skill') {
-                const sourceCard = this.cards[cmd.sourceCardId];
-                const enemyCard = this.cards[cmd.targetCardId];
-                if (sourceCard && enemyCard) {
-                    const sourceCenter = this.scene.getCellCenter(sourceCard.col, sourceCard.row);
-                    const targetCenter = this.scene.getCellCenter(enemyCard.col, enemyCard.row);
-                    const bullet = this.scene.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
-                    tweenConfigs.push({
-                        targets: bullet,
-                        x: targetCenter.x,
-                        y: targetCenter.y,
-                        duration: cmd.bulletDuration,
-                        onComplete: () => {
-                            bullet.destroy();
-                            enemyCard.sprite.setTint(0xff0000);
-                            this.scene.time.delayedCall(cmd.flashDuration, () => {
-                                enemyCard.sprite.clearTint();
-                                enemyCard.hp -= 1;
-                                enemyCard.stealth -= 1;
-                                this.updateCardStatsText(enemyCard);
-                            });
-                        }
-                    });
-                }
-            } else if (cmd.type === 'trap') {
-                const center = this.scene.getCellCenter(cmd.destination.col, cmd.destination.row);
-                const trapSprite = this.scene.add.image(center.x, center.y, 'skill');
-                trapSprite.setDisplaySize(this.scene.cellSize, this.scene.cellSize);
-                trapSprite.setDepth(1);
-                this.scene.tweens.add({
-                    targets: trapSprite,
-                    alpha: { from: 0, to: 1 },
-                    duration: cmd.duration
-                });
-                this.traps.push({ col: cmd.destination.col, row: cmd.destination.row, sprite: trapSprite });
-            }
-        });
-        this.scene.playTweenSequence(tweenConfigs, () => {
-            this.updateBoardState(finalState);
-        });
-    }
-
-    updateBoardState(state) {
-        Object.keys(state).forEach(cardId => {
-            const card = this.cards[cardId];
-            if (card) {
-                const cardState = state[cardId];
-                card.col = cardState.col;
-                card.row = cardState.row;
-                card.hp = cardState.hp;
-                card.stealth = cardState.stealth;
-                this.updateCardStatsText(card);
-                const center = this.scene.getCellCenter(card.col, card.row);
-                this.scene.tweens.add({
-                    targets: card.container,
-                    x: center.x,
-                    y: center.y,
-                    duration: 500
-                });
-            }
-        });
-        // ターン終了時の隠密チェック
+        // ターン終了時、隠密チェック
         this.updateStealthProximity();
-        this.updateCardVisibility();
-        this.checkGameOver();
-        if (!this.gameOver) this.startTurn();
+
+        // 各カードの最終状態を記録
+        const finalState = {};
+        Object.values(this.cards).forEach(card => {
+            finalState[card.id] = {
+                col: card.col,
+                row: card.row,
+                hp: card.hp,
+                stealth: card.stealth
+            };
+        });
+
+        // ゲーム終了チェック
+        const gameOver = this.checkGameOver();
+
+        return {
+            animationCommands,
+            finalState,
+            gameOver
+        };
+    }
+
+    checkForTrap(card, animationCommands) {
+        const trapIndex = this.traps.findIndex(trap => trap.col === card.col && trap.row === card.row);
+        if (trapIndex !== -1) {
+            // 罠効果の適用
+            card.hp -= 1;
+            card.stealth -= 1;
+
+            // 罠発動アニメーションコマンドを追加（必要に応じて）
+            animationCommands.push({
+                type: 'trapTriggered',
+                cardId: card.id,
+                position: { col: card.col, row: card.row }
+            });
+
+            // 罠を除去
+            this.traps.splice(trapIndex, 1);
+        }
     }
 
     /**
-     * 敵カードの正面（ホスト：上、ゲスト：下）の近くにいる場合、対象カードの隠密値を低下させる
+     * 敵カードの正面の近くにいる場合、対象カードの隠密値を低下させる
      */
     updateStealthProximity() {
         Object.values(this.cards).forEach(card => {
@@ -442,7 +236,6 @@ export class GameLogic {
                     if (card.col === enemy.col && card.row === frontRow) {
                         // 複数の敵が正面にいれば複数回低下する可能性あり
                         card.stealth -= 1;
-                        this.updateCardStatsText(card);
                     }
                 }
             });
@@ -450,86 +243,41 @@ export class GameLogic {
     }
 
     /**
-     * 各カードのUI表示（隠密状態の場合は相手には非表示）
+     * 相手カードが可視か判定（隠密値が0以下で可視）
      */
-    updateCardVisibility() {
-        Object.values(this.cards).forEach(card => {
-            if (card.owner !== this.localPlayer) {
-                // 隠密値が正なら非表示、0以下なら表示
-                card.container.setVisible(card.stealth <= 0);
-            } else {
-                // 自分のカードは常に表示
-                card.container.setVisible(true);
+    isCardVisible(cardId, viewer) {
+        const card = this.cards[cardId];
+        if (!card) return false;
+
+        // 自分のカードは常に表示
+        if (card.owner === viewer) return true;
+
+        // 隠密値が0以下なら表示
+        return card.stealth <= 0;
+    }
+
+    updateBoardState(state) {
+        Object.keys(state).forEach(cardId => {
+            const card = this.cards[cardId];
+            if (card) {
+                const cardState = state[cardId];
+                card.col = cardState.col;
+                card.row = cardState.row;
+                card.hp = cardState.hp;
+                card.stealth = cardState.stealth;
             }
         });
-    }
-
-    /**
-     * カードのステータス表示（HP, SPD, 隠密値）を更新
-     */
-    updateCardStatsText(card) {
-        card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}\nST:${card.stealth}`);
-    }
-
-    checkForTrap(card) {
-        const trapIndex = this.traps.findIndex(trap => trap.col === card.col && trap.row === card.row);
-        if (trapIndex !== -1) {
-            const trap = this.traps[trapIndex];
-            card.sprite.setTint(0xff0000);
-            this.scene.time.delayedCall(100, () => {
-                card.sprite.clearTint();
-                card.hp -= 1;
-                card.stealth -= 1; // 罠による隠密低下
-                this.updateCardStatsText(card);
-            });
-            trap.sprite.destroy();
-            this.traps.splice(trapIndex, 1);
-        }
     }
 
     checkGameOver() {
         const hostAlive = Object.values(this.cards).filter(card => card.owner === 'host' && card.hp > 0);
         const guestAlive = Object.values(this.cards).filter(card => card.owner === 'guest' && card.hp > 0);
+
         if (hostAlive.length === 0 || guestAlive.length === 0) {
             this.gameOver = true;
-            const winner = hostAlive.length > 0 ? 'Host' : 'Guest';
-            alert(`Game Over! Winner: ${winner}`);
+            return hostAlive.length > 0 ? 'host' : 'guest';
         }
-    }
 
-    // ---------------------------
-    // ゲームメッセージの受信処理
-    // ---------------------------
-
-    handleGameMessage(event) {
-        const parsed = typeof event.detail === 'string'
-            ? JSON.parse(event.detail)
-            : event.detail;
-
-        switch (parsed.type) {
-            case 'playerAction':
-                if (this.isMaster) {
-                    this.turnActions[this.remotePlayer] = parsed.action;
-                    console.log("Received remote action:", parsed.action);
-                    if (this.turnActions[this.localPlayer]) this.resolveTurn();
-                }
-                break;
-            case 'turnResult':
-                this.updateBoardState(parsed.state);
-                break;
-            case 'turnAnimation':
-                this.playTurnAnimation(parsed.commands, parsed.finalState);
-                break;
-            case 'turnReady':
-                this.turnReadyStates[parsed.from] = true;
-                if (this.isMaster && this.turnReadyStates.host && this.turnReadyStates.guest) {
-                    sendGameMessage(JSON.stringify({ type: 'turnStart' }));
-                    this.actualStartTurn();
-                }
-                break;
-            case 'turnStart':
-                this.actualStartTurn();
-                break;
-        }
+        return null; // ゲーム続行
     }
 }

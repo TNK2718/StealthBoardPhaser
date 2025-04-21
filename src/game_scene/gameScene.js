@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GameLogic } from './gameLogic';
+import { GameController } from './gameController';
 
 export class GameScene extends Phaser.Scene {
     constructor() {
@@ -16,8 +16,8 @@ export class GameScene extends Phaser.Scene {
         this.localPlayer = this.isMaster ? 'host' : 'guest';
         this.remotePlayer = this.isMaster ? 'guest' : 'host';
 
-        // ゲームロジッククラスのインスタンスを生成（UI側の参照を渡す）
-        this.gameLogic = new GameLogic(this, {
+        // ゲームコントローラーの初期化
+        this.controller = new GameController(this, {
             isMaster: this.isMaster,
             localPlayer: this.localPlayer,
             remotePlayer: this.remotePlayer
@@ -35,8 +35,8 @@ export class GameScene extends Phaser.Scene {
         // グリッド設定
         this.setupGrid();
 
-        // カード生成（gameLogic 内で状態管理＋UI作成を実施）
-        this.gameLogic.createCards();
+        // カード生成
+        this.controller.createCards();
 
         // ターン状態表示テキスト
         this.turnStatusText = this.add.text(
@@ -47,10 +47,10 @@ export class GameScene extends Phaser.Scene {
         ).setOrigin(0.5);
 
         // ゲームメッセージ受信用イベントリスナーの登録
-        window.addEventListener('gameMessage', this.gameLogic.handleGameMessage.bind(this.gameLogic));
+        window.addEventListener('gameMessage', this.controller.handleGameMessage);
 
         // ターン開始処理
-        this.gameLogic.startTurn();
+        this.controller.startTurn();
     }
 
     // ---------------------------
@@ -110,14 +110,14 @@ export class GameScene extends Phaser.Scene {
 
         // 同じ行の空セル
         for (let col = 0; col < this.cols; col++) {
-            if (col !== card.col && !this.gameLogic.isCellOccupied(col, card.row, card.id)) {
+            if (col !== card.col && !this.controller.gameLogic.isCellOccupied(col, card.row, card.id)) {
                 const center = this.getCellCenter(col, card.row);
                 indicators.push(this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0x0000ff, 0.3));
             }
         }
         // 同じ列の空セル
         for (let row = 0; row < this.rows; row++) {
-            if (row !== card.row && !this.gameLogic.isCellOccupied(card.col, row, card.id)) {
+            if (row !== card.row && !this.controller.gameLogic.isCellOccupied(card.col, row, card.id)) {
                 const center = this.getCellCenter(card.col, row);
                 indicators.push(this.add.rectangle(center.x, center.y, this.cellSize, this.cellSize, 0x0000ff, 0.3));
             }
@@ -235,8 +235,8 @@ export class GameScene extends Phaser.Scene {
                 y: center.y,
                 duration: 200,
                 onComplete: () => {
-                    // ロジック側へスキルアクション登録を依頼
-                    this.gameLogic.registerLocalAction({
+                    // コントローラー経由でスキルアクション登録を依頼
+                    this.controller.registerLocalAction({
                         cardId: card.id,
                         actionType: 'skill',
                         skillSubtype: skillSubtype,
@@ -299,8 +299,8 @@ export class GameScene extends Phaser.Scene {
      * ローカル側カードの入力無効化
      */
     disableLocalCardInput() {
-        Object.values(this.gameLogic.cards).forEach(card => {
-            if (card.owner === this.localPlayer) {
+        Object.values(this.controller.gameLogic.cards).forEach(card => {
+            if (card.owner === this.localPlayer && card.container) {
                 card.container.disableInteractive();
             }
         });
@@ -310,14 +310,15 @@ export class GameScene extends Phaser.Scene {
      * ローカル側カードの入力有効化
      */
     enableLocalCardInput() {
-        Object.values(this.gameLogic.cards).forEach(card => {
-            if (card.owner === this.localPlayer) {
+        Object.values(this.controller.gameLogic.cards).forEach(card => {
+            if (card.owner === this.localPlayer && card.container) {
                 card.container.setInteractive();
             }
         });
     }
 
     shutdown() {
-        window.removeEventListener('gameMessage', this.gameLogic.handleGameMessage.bind(this.gameLogic));
+        window.removeEventListener('gameMessage', this.controller.handleGameMessage);
+        this.controller.cleanup();
     }
 }
