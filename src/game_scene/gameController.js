@@ -1,5 +1,6 @@
 import { sendGameMessage } from '../webrtc';
 import { GameLogic } from './gameLogic';
+import { CardUI } from './ui/cardUI';
 
 export class GameController {
     constructor(scene, { isMaster, localPlayer, remotePlayer }) {
@@ -10,6 +11,9 @@ export class GameController {
 
         // モデル（ゲームロジック）の初期化
         this.gameLogic = new GameLogic();
+
+        // カードUI管理クラスの初期化
+        this.cardUI = new CardUI(scene, this);
 
         // WebRTCからのメッセージハンドラの登録
         this.setupMessageHandler();
@@ -28,100 +32,11 @@ export class GameController {
 
         // 各カードのUI要素を作成
         cards.forEach(cardData => {
-            this.createCardUI(cardData);
+            this.cardUI.createCardUI(cardData, this.localPlayer);
         });
 
         // 初期表示更新
         this.updateCardVisibility();
-    }
-
-    createCardUI(cardData) {
-        const center = this.scene.getCellCenter(cardData.col, cardData.row);
-        const cardContainer = this.scene.add.container(center.x, center.y);
-
-        // カードのサイズはセルサイズの80%
-        const desiredCardSize = this.scene.cellSize * 0.8;
-        const cardSprite = this.scene.add.image(0, 0, 'ship');
-        cardSprite.setDisplaySize(desiredCardSize, desiredCardSize);
-        cardContainer.add(cardSprite);
-
-        // カードステータス表示テキスト
-        const statsText = this.scene.add.text(
-            -this.scene.cellSize / 4, -this.scene.cellSize / 4,
-            `HP:${cardData.hp}\nSPD:${cardData.speed}\nST:${cardData.stealth}`,
-            { fontSize: '12px', fill: '#ffffff' }
-        );
-        cardContainer.add(statsText);
-        cardContainer.setDepth(2);
-
-        // UIオブジェクトをゲームカードに紐づける
-        const card = this.gameLogic.getCardById(cardData.id);
-        card.container = cardContainer;
-        card.sprite = cardSprite;
-        card.statsText = statsText;
-
-        // 自分のカードの場合、入力イベントを登録
-        if (card.owner === this.localPlayer) {
-            cardContainer.setSize(desiredCardSize, desiredCardSize);
-            cardContainer.setInteractive();
-            this.scene.input.setDraggable(cardContainer);
-            this.setupCardInputEvents(card);
-        }
-    }
-
-    setupCardInputEvents(card) {
-        const container = card.container;
-
-        container.on('pointerdown', (pointer) => {
-            if (this.gameLogic.turnActions[this.localPlayer]) return;
-            container.startX = pointer.x;
-            container.startY = pointer.y;
-            container.hasMoved = false;
-            this.scene.showMoveIndicators(card);
-        });
-
-        container.on('drag', (pointer, dragX, dragY) => {
-            if (this.gameLogic.turnActions[this.localPlayer]) return;
-            container.hasMoved = true;
-            container.x = dragX;
-            container.y = dragY;
-        });
-
-        container.on('dragend', (pointer) => {
-            if (this.gameLogic.turnActions[this.localPlayer]) return;
-            this.scene.clearMoveIndicators();
-            if (container.hasMoved) {
-                const newPos = this.scene.getNearestGridPosition(container.x, container.y);
-                const origCenter = this.scene.getCellCenter(card.col, card.row);
-                this.scene.tweens.add({
-                    targets: container,
-                    x: origCenter.x,
-                    y: origCenter.y,
-                    duration: 200,
-                    onComplete: () => {
-                        // 移動は縦横のみ許可かつセルが空の場合に登録
-                        if (!this.gameLogic.isCellOccupied(newPos.col, newPos.row, card.id) &&
-                            (newPos.col !== card.col || newPos.row !== card.row) &&
-                            (newPos.col === card.col || newPos.row === card.row)) {
-                            this.registerLocalAction({
-                                cardId: card.id,
-                                actionType: 'move',
-                                destination: { col: newPos.col, row: newPos.row }
-                            });
-                        }
-                    }
-                });
-            }
-        });
-
-        container.on('pointerup', () => {
-            if (this.gameLogic.turnActions[this.localPlayer]) return;
-            this.scene.clearMoveIndicators();
-            if (!container.hasMoved) {
-                // クリック時はスキルメニューを表示
-                this.scene.showSkillMenu(card);
-            }
-        });
     }
 
     /**
@@ -221,6 +136,16 @@ export class GameController {
         }
     }
 
+    // アクションが既に登録されているか確認するヘルパー関数
+    isActionRegistered() {
+        return !!this.gameLogic.turnActions[this.localPlayer];
+    }
+
+    // セルが占有されているか確認する関数をゲームロジックに委譲
+    isCellOccupied(col, row, cardId) {
+        return this.gameLogic.isCellOccupied(col, row, cardId);
+    }
+
     resolveTurn() {
         const result = this.gameLogic.processActionPair();
         if (!result) {
@@ -281,51 +206,37 @@ export class GameController {
                 const enemyCard = this.gameLogic.getCardById(cmd.targetCardId);
 
                 if (sourceCard && sourceCard.container && enemyCard && enemyCard.container) {
-                    const sourceCenter = this.scene.getCellCenter(sourceCard.col, sourceCard.row);
-                    const targetCenter = this.scene.getCellCenter(enemyCard.col, enemyCard.row);
-                    const bullet = this.scene.add.circle(sourceCenter.x, sourceCenter.y, 5, 0xffff00);
+                    // 攻撃アニメーションをCardUIに委譲
+                    this.cardUI.playAttackAnimation(
+                        sourceCard,
+                        enemyCard,
+                        cmd.bulletDuration,
+                        cmd.flashDuration
+                    );
+                    // tweenConfigsにはpushしない（CardUI内で完結）
+                }
+            } else if (cmd.type === 'trap') {
+                const card = this.gameLogic.getCardById(cmd.cardId);
+                if (card) {
+                    // 罠設置アニメーションをCardUIに委譲
+                    const trapSprite = this.cardUI.playTrapAnimation(
+                        card,
+                        cmd.destination,
+                        cmd.duration
+                    );
 
-                    tweenConfigs.push({
-                        targets: bullet,
-                        x: targetCenter.x,
-                        y: targetCenter.y,
-                        duration: cmd.bulletDuration,
-                        onComplete: () => {
-                            bullet.destroy();
-                            enemyCard.sprite.setTint(0xff0000);
-                            this.scene.time.delayedCall(cmd.flashDuration, () => {
-                                enemyCard.sprite.clearTint();
-                                this.updateCardStats(enemyCard);
-                            });
+                    // 罠のスプライトを記録
+                    this.gameLogic.traps.forEach(trap => {
+                        if (trap.col === cmd.destination.col && trap.row === cmd.destination.row) {
+                            trap.sprite = trapSprite;
                         }
                     });
                 }
-            } else if (cmd.type === 'trap') {
-                const center = this.scene.getCellCenter(cmd.destination.col, cmd.destination.row);
-                const trapSprite = this.scene.add.image(center.x, center.y, 'skill');
-                trapSprite.setDisplaySize(this.scene.cellSize, this.scene.cellSize);
-                trapSprite.setDepth(1);
-
-                this.scene.tweens.add({
-                    targets: trapSprite,
-                    alpha: { from: 0, to: 1 },
-                    duration: cmd.duration
-                });
-
-                // 罠のスプライトを記録
-                this.gameLogic.traps.forEach(trap => {
-                    if (trap.col === cmd.destination.col && trap.row === cmd.destination.row) {
-                        trap.sprite = trapSprite;
-                    }
-                });
             } else if (cmd.type === 'trapTriggered') {
                 const card = this.gameLogic.getCardById(cmd.cardId);
-                if (card && card.sprite) {
-                    card.sprite.setTint(0xff0000);
-                    this.scene.time.delayedCall(100, () => {
-                        card.sprite.clearTint();
-                        this.updateCardStats(card);
-                    });
+                if (card) {
+                    // 罠起動アニメーションをCardUIに委譲
+                    this.cardUI.playTrapTriggeredAnimation(card);
                 }
             }
         });
@@ -353,17 +264,10 @@ export class GameController {
         Object.keys(state).forEach(cardId => {
             const card = this.gameLogic.getCardById(cardId);
             if (card && card.container) {
-                const cardState = state[cardId];
-                const center = this.scene.getCellCenter(cardState.col, cardState.row);
-
-                this.scene.tweens.add({
-                    targets: card.container,
-                    x: center.x,
-                    y: center.y,
-                    duration: 500
-                });
-
-                this.updateCardStats(card);
+                // カード位置更新をCardUIに委譲
+                this.cardUI.updateCardPosition(card);
+                // カードステータス更新をCardUIに委譲
+                this.cardUI.updateCardStats(card);
             }
         });
 
@@ -380,9 +284,7 @@ export class GameController {
     }
 
     updateCardStats(card) {
-        if (card && card.statsText) {
-            card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}\nST:${card.stealth}`);
-        }
+        this.cardUI.updateCardStats(card);
     }
 
     updateAllCardStats() {

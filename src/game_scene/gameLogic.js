@@ -1,4 +1,5 @@
 import { sendGameMessage } from '../webrtc';
+import { Card } from './logic/card/card';
 
 export class GameLogic {
     constructor() {
@@ -52,16 +53,16 @@ export class GameLogic {
     }
 
     createCardData(cardData, col, row) {
-        // カードのデータモデルのみを作成
-        const card = {
-            id: cardData.id,
-            owner: cardData.id.startsWith('host') ? 'host' : 'guest',
-            hp: cardData.hp,
-            speed: cardData.speed,
+        // カード初期設定にstealth値を追加
+        const cardInitData = {
+            ...cardData,
             col,
             row,
             stealth: 3 // 初期隠密値
         };
+
+        // Cardクラスのインスタンスを作成
+        const card = new Card(cardInitData);
         this.cards[card.id] = card;
         return card;
     }
@@ -71,7 +72,7 @@ export class GameLogic {
      */
     isCellOccupied(col, row, movingCardId) {
         return Object.values(this.cards).some(card => {
-            return card.id !== movingCardId && card.col === col && card.row === row && card.hp > 0;
+            return card.id !== movingCardId && card.col === col && card.row === row && card.isAlive();
         });
     }
 
@@ -143,7 +144,7 @@ export class GameLogic {
                         c.owner !== card.owner &&
                         c.col === targetGrid.col &&
                         c.row === targetGrid.row &&
-                        c.hp > 0
+                        c.isAlive()
                     );
 
                     if (enemyCard) {
@@ -248,30 +249,21 @@ export class GameLogic {
     isCardVisible(cardId, viewer) {
         const card = this.cards[cardId];
         if (!card) return false;
-
-        // 自分のカードは常に表示
-        if (card.owner === viewer) return true;
-
-        // 隠密値が0以下なら表示
-        return card.stealth <= 0;
+        return card.isVisibleTo(viewer);
     }
 
     updateBoardState(state) {
         Object.keys(state).forEach(cardId => {
             const card = this.cards[cardId];
             if (card) {
-                const cardState = state[cardId];
-                card.col = cardState.col;
-                card.row = cardState.row;
-                card.hp = cardState.hp;
-                card.stealth = cardState.stealth;
+                card.updateState(state[cardId]);
             }
         });
     }
 
     checkGameOver() {
-        const hostAlive = Object.values(this.cards).filter(card => card.owner === 'host' && card.hp > 0);
-        const guestAlive = Object.values(this.cards).filter(card => card.owner === 'guest' && card.hp > 0);
+        const hostAlive = Object.values(this.cards).filter(card => card.owner === 'host' && card.isAlive());
+        const guestAlive = Object.values(this.cards).filter(card => card.owner === 'guest' && card.isAlive());
 
         if (hostAlive.length === 0 || guestAlive.length === 0) {
             this.gameOver = true;
