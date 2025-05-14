@@ -1,7 +1,5 @@
 import Phaser from 'phaser';
-import { io } from 'socket.io-client';
-import { initWebRTC, onConnectionReady, sendGameMove } from '../webrtc';
-import { GameScene } from '../game_scene/gameScene';
+import { initWebRTC, onConnectionReady } from '../webrtc';
 
 export class LobbyScene extends Phaser.Scene {
     constructor() {
@@ -86,7 +84,8 @@ export class LobbyScene extends Phaser.Scene {
         this.roomItems = [];
 
         if (rooms.length === 0) {
-            this.add.text(400, 200, 'No rooms available', { fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
+            const noRoomsText = this.add.text(400, 200, 'No rooms available', { fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
+            this.roomItems.push(noRoomsText);
             return;
         }
 
@@ -111,7 +110,7 @@ export class LobbyScene extends Phaser.Scene {
     startRoomUpdates() {
         this.socket.emit('getRooms');
         this.roomUpdateEvent = this.time.addEvent({
-            delay: 5000,
+            delay: 1000,
             callback: () => this.socket.emit('getRooms'),
             loop: true
         });

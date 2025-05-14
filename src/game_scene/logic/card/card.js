@@ -2,11 +2,15 @@ export class Card {
     constructor(cardData) {
         this.id = cardData.id;
         this.owner = cardData.id.startsWith('host') ? 'host' : 'guest';
-        this.hp = cardData.hp;
-        this.speed = cardData.speed;
-        this.col = cardData.col;
         this.row = cardData.row;
-        this.stealth = cardData.stealth || 3; // 初期隠密値
+        this.col = cardData.col;
+        this.hp = cardData.hp;
+        this.maxHp = cardData.hp;
+        this.atk = cardData.atk;
+        this.atkRange = cardData.atkRange;
+        this.speed = cardData.speed;
+        this.stealth = cardData.stealth;
+        this.stealthRegeneration = cardData.stealthRegeneration;
 
         // UI references - will be set by CardUI
         this.container = null;
@@ -21,7 +25,9 @@ export class Card {
         if (state.col !== undefined) this.col = state.col;
         if (state.row !== undefined) this.row = state.row;
         if (state.hp !== undefined) this.hp = state.hp;
+        if (state.speed !== undefined) this.speed = state.speed;
         if (state.stealth !== undefined) this.stealth = state.stealth;
+        if (state.stealthRegeneration !== undefined) this.stealthRegeneration = state.stealthRegeneration;
     }
 
     /**

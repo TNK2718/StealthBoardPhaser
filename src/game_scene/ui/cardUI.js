@@ -6,30 +6,98 @@ export class CardUI {
 
     /**
      * カードのUI要素を作成
-     */
-    createCardUI(card, localPlayer) {
+     */    createCardUI(card, localPlayer) {
         const center = this.scene.getCellCenter(card.col, card.row);
         const cardContainer = this.scene.add.container(center.x, center.y);
 
         // カードのサイズはセルサイズの80%
         const desiredCardSize = this.scene.cellSize * 0.8;
-        const cardSprite = this.scene.add.image(0, 0, 'ship');
-        cardSprite.setDisplaySize(desiredCardSize, desiredCardSize);
+
+        // カードの背景（赤色の背景）
+        const cardBg = this.scene.add.graphics();
+        cardBg.fillStyle(0x8B0000, 1); // 濃い赤色
+        cardBg.fillRect(-desiredCardSize / 2, -desiredCardSize / 2, desiredCardSize, desiredCardSize);
+        cardBg.lineStyle(2, 0xFFD700); // 金色の枠線
+        cardBg.strokeRect(-desiredCardSize / 2, -desiredCardSize / 2, desiredCardSize, desiredCardSize);
+        cardContainer.add(cardBg);
+
+        // キャラクターイメージ
+        const cardSprite = this.scene.add.image(0, 0, 'placeholder');
+        cardSprite.setDisplaySize(desiredCardSize * 0.8, desiredCardSize * 0.8);
         cardContainer.add(cardSprite);
 
-        // カードステータス表示テキスト
-        const statsText = this.scene.add.text(
-            -this.scene.cellSize / 4, -this.scene.cellSize / 4,
-            `HP:${card.hp}\nSPD:${card.speed}\nST:${card.stealth}`,
-            { fontSize: '12px', fill: '#ffffff' }
+        // 左上のステータス表示（コスト/パワー）
+        const topLeftValue = this.scene.add.graphics();
+        topLeftValue.fillStyle(0x006400, 1); // 濃い緑色
+        topLeftValue.fillCircle(-desiredCardSize / 2 + desiredCardSize / 6, -desiredCardSize / 2 + desiredCardSize / 6, desiredCardSize / 8);
+        cardContainer.add(topLeftValue);
+
+        const topLeftText = this.scene.add.text(
+            -desiredCardSize / 2 + desiredCardSize / 6,
+            -desiredCardSize / 2 + desiredCardSize / 6,
+            `${card.hp}`,
+            {
+                fontSize: '16px',
+                fontStyle: 'bold',
+                fill: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 1.5,
+                align: 'center'
+            }
         );
-        cardContainer.add(statsText);
-        cardContainer.setDepth(2);
+        topLeftText.setOrigin(0.5);
+        cardContainer.add(topLeftText);
+
+        // 右下のステータス表示（攻撃力/移動力）
+        const bottomRightValue = this.scene.add.graphics();
+        bottomRightValue.fillStyle(0x8B0000, 1); // 濃い赤色
+        bottomRightValue.fillCircle(desiredCardSize / 2 - desiredCardSize / 6, desiredCardSize / 2 - desiredCardSize / 6, desiredCardSize / 8);
+        cardContainer.add(bottomRightValue);
+
+        const bottomRightText = this.scene.add.text(
+            desiredCardSize / 2 - desiredCardSize / 6,
+            desiredCardSize / 2 - desiredCardSize / 6,
+            `${card.speed}`,
+            {
+                fontSize: '16px',
+                fontStyle: 'bold',
+                fill: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 1.5,
+                align: 'center'
+            }
+        );
+        bottomRightText.setOrigin(0.5);
+        cardContainer.add(bottomRightText);
+
+        // ステルス値は別の場所に表示
+        const stealthValue = this.scene.add.graphics();
+        stealthValue.fillStyle(0x4682B4, 1); // スチールブルー
+        stealthValue.fillCircle(-desiredCardSize / 2 + desiredCardSize / 6, desiredCardSize / 2 - desiredCardSize / 6, desiredCardSize / 8);
+        cardContainer.add(stealthValue);
+
+        const stealthText = this.scene.add.text(
+            -desiredCardSize / 2 + desiredCardSize / 6,
+            desiredCardSize / 2 - desiredCardSize / 6,
+            `${card.stealth}`,
+            {
+                fontSize: '16px',
+                fontStyle: 'bold',
+                fill: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 1.5,
+                align: 'center'
+            }
+        );
+        stealthText.setOrigin(0.5);
+        cardContainer.add(stealthText); cardContainer.setDepth(2);
 
         // UIオブジェクトをカードに紐づける
         card.container = cardContainer;
         card.sprite = cardSprite;
-        card.statsText = statsText;
+        card.hpText = topLeftText;
+        card.speedText = bottomRightText;
+        card.stealthText = stealthText;
 
         // 自分のカードの場合、入力イベントを登録
         if (card.owner === localPlayer) {
@@ -96,14 +164,20 @@ export class CardUI {
                 this.scene.showSkillMenu(card);
             }
         });
-    }
-
-    /**
+    }    /**
      * カードステータスの表示を更新
      */
     updateCardStats(card) {
-        if (card && card.statsText) {
-            card.statsText.setText(`HP:${card.hp}\nSPD:${card.speed}\nST:${card.stealth}`);
+        if (card) {
+            if (card.hpText) {
+                card.hpText.setText(`${card.hp}`);
+            }
+            if (card.speedText) {
+                card.speedText.setText(`${card.speed}`);
+            }
+            if (card.stealthText) {
+                card.stealthText.setText(`${card.stealth}`);
+            }
         }
     }
 
