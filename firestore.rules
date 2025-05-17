@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow authenticated users to read their own profile
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow authenticated users to read matchmaking queue entries
+    match /matchmaking_queue/{entryId} {
+      allow read: if request.auth != null;
+      // Only Cloud Functions can write to matchmaking queue
+      allow write: if false;
+    }
+    
+    // Allow authenticated users to read games they are part of
+    match /games/{gameId} {
+      allow read: if request.auth != null && 
+                  (resource.data.player1 == request.auth.uid || 
+                   resource.data.player2 == request.auth.uid);
+                   
+      // Only Cloud Functions can write to games
+      allow write: if false;
+    }
+  }
+}

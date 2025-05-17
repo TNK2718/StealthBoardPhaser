@@ -13,3 +13,7 @@ node_modules/
 # Build
 dist/
 /npm-debug.log
+
+# Environment variables
+.env
+.env.local

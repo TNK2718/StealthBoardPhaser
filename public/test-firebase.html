@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase Functions Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #1e1e1e;
+            color: #fff;
+        }
+
+        h1 {
+            color: #4CAF50;
+        }
+
+        #results {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            margin-top: 20px;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Firebase Functions Test</h1>
+    <div id="results">Console output will appear here...</div>
+    <button id="test-button">Test Matchmaking</button>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.15.0/firebase-app.js";
+        import { getAuth, signInAnonymously, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.15.0/firebase-auth.js";
+        import { getFunctions, httpsCallable, connectFunctionsEmulator } from "https://www.gstatic.com/firebasejs/10.15.0/firebase-functions.js";
+        import { getFirestore, connectFirestoreEmulator } from "https://www.gstatic.com/firebasejs/10.15.0/firebase-firestore.js";
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDummy-For-Emulator", // Dummy API key for emulator
+            authDomain: "demo-stealth-board.firebaseapp.com",
+            projectId: "demo-stealth-board",
+            storageBucket: "demo-stealth-board.appspot.com",
+            messagingSenderId: "000000000000",
+            appId: "1:000000000000:web:0000000000000000000000",
+            measurementId: "G-00000000"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const functions = getFunctions(app);
+        const db = getFirestore(app);
+
+        // Connect to emulators
+        connectAuthEmulator(auth, "http://localhost:9099");
+        connectFunctionsEmulator(functions, 'localhost', 5001);
+        connectFirestoreEmulator(db, 'localhost', 8089);
+
+        // Reference to the enterMatchQueue function
+        const enterMatchQueue = httpsCallable(functions, 'enterMatchQueue');
+
+        // Log console output to the results div
+        const resultsDiv = document.getElementById('results');
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+
+        console.log = function () {
+            originalConsoleLog.apply(console, arguments);
+            const args = Array.from(arguments);
+            resultsDiv.textContent += "\n> " + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : a).join(' ');
+        };
+
+        console.error = function () {
+            originalConsoleError.apply(console, arguments);
+            const args = Array.from(arguments);
+            resultsDiv.textContent += "\n> ERROR: " + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : a).join(' ');
+        };
+
+        // Test matchmaking function
+        async function testMatchmaking() {
+            try {
+                resultsDiv.textContent = "Testing matchmaking...";
+
+                // Sign in anonymously
+                console.log("Signing in anonymously...");
+                const userCredential = await signInAnonymously(auth);
+                console.log("Signed in successfully:", userCredential.user.uid);
+
+                // Call the enterMatchQueue function
+                console.log("Entering match queue...");
+                const result = await enterMatchQueue();
+                console.log("Matchmaking result:", result.data);
+
+            } catch (error) {
+                console.error("Error in test:", error);
+            }
+        }
+
+        // Add button event listener
+        document.getElementById('test-button').addEventListener('click', testMatchmaking);
+    </script>
+</body>
+
+</html>

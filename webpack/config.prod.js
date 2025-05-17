@@ -4,6 +4,7 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
 const TerserPlugin = require("terser-webpack-plugin");
 const webpack = require("webpack");
+const Dotenv = require('dotenv-webpack');
 
 const line = "---------------------------------------------------------";
 const msg = `❤️❤️❤️ Tell us about your game! - games@phaser.io ❤️❤️❤️`;
@@ -50,9 +51,13 @@ module.exports = {
                 }
             })
         ]
-    },
-    plugins: [
+    }, plugins: [
         new CleanWebpackPlugin(),
+        new Dotenv({
+            path: './.env',
+            safe: true,
+            systemvars: true,
+        }),
         new webpack.DefinePlugin({
             "typeof CANVAS_RENDERER": JSON.stringify(true),
             "typeof WEBGL_RENDERER": JSON.stringify(true),

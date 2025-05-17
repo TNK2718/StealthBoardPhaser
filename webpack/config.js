@@ -2,6 +2,7 @@ const { CleanWebpackPlugin } = require("clean-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
 const webpack = require("webpack");
+const Dotenv = require('dotenv-webpack');
 
 module.exports = {
     mode: "development",
@@ -33,6 +34,11 @@ module.exports = {
     plugins: [
         new CleanWebpackPlugin({
             cleanOnceBeforeBuildPatterns: [path.join(__dirname, "dist/**/*")]
+        }),
+        new Dotenv({
+            path: './.env', // Path to .env file
+            safe: true, // Ensure all variables in .env.example are defined in .env
+            systemvars: true, // Load system variables as well
         }),
         new webpack.DefinePlugin({
             "typeof CANVAS_RENDERER": JSON.stringify(true),

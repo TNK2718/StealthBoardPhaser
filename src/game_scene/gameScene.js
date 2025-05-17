@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GameController } from './gameController';
+import firebaseService from '../firebase/firebaseService';
 
 export class GameScene extends Phaser.Scene {
     constructor() {
@@ -9,16 +10,26 @@ export class GameScene extends Phaser.Scene {
         this.skillIndicators = [];
         this.skillMenuSprites = [];
         this.skillMenuTexts = [];
+        this.gridInitialized = false; // Flag to track grid initialization
     }
 
     init(data) {
-        this.isMaster = data.isMaster;
-        this.localPlayer = this.isMaster ? 'host' : 'guest';
-        this.remotePlayer = this.isMaster ? 'guest' : 'host';
+        this.gameId = data.gameId;
+        this.playerRole = data.playerRole;
+
+        // Determine if we're player1 (host) or player2 (guest)
+        this.localPlayer = this.playerRole === 'player1' ? 'host' : 'guest';
+        this.remotePlayer = this.playerRole === 'player1' ? 'guest' : 'host';
+
+        // Set global game context for visibility checks
+        if (window.gameContext) {
+            window.gameContext.setPlayerInfo(this.localPlayer, this.remotePlayer, this.playerRole);
+        }
 
         // ゲームコントローラーの初期化
         this.controller = new GameController(this, {
-            isMaster: this.isMaster,
+            gameId: this.gameId,
+            playerRole: this.playerRole,
             localPlayer: this.localPlayer,
             remotePlayer: this.remotePlayer
         });
@@ -35,9 +46,6 @@ export class GameScene extends Phaser.Scene {
         // グリッド設定
         this.setupGrid();
 
-        // カード生成
-        this.controller.createCards();
-
         // ターン状態表示テキスト
         this.turnStatusText = this.add.text(
             this.cameras.main.centerX,
@@ -46,11 +54,24 @@ export class GameScene extends Phaser.Scene {
             { fontSize: '20px', fill: '#ffffff' }
         ).setOrigin(0.5);
 
-        // ゲームメッセージ受信用イベントリスナーの登録
-        window.addEventListener('gameMessage', this.controller.handleGameMessage);
+        // Initialize cards with delay to ensure grid is ready
+        this.time.delayedCall(100, () => {
+            // Double check grid initialization
+            if (!this.gridInitialized) {
+                console.warn("Grid not fully initialized yet, setting up grid again");
+                this.setupGrid();
+            }
 
-        // ターン開始処理
-        this.controller.startTurn();
+            // Create cards after ensuring grid is initialized
+            console.log("Creating cards with initialized grid");
+            this.controller.createCards();
+
+            // Enable board for input
+            this.enableLocalCardInput();
+
+            // Start turn after cards are created
+            this.controller.startTurn();
+        });
     }
 
     // ---------------------------
@@ -61,33 +82,108 @@ export class GameScene extends Phaser.Scene {
      * グリッド設定（縦7行×横3列、各セル60px）
      */
     setupGrid() {
+        // Set grid dimensions
         this.cols = 3;
         this.rows = 7;
         this.cellSize = 60;
+
+        // Ensure camera is available
+        if (!this.cameras || !this.cameras.main) {
+            console.error("Camera not available during grid setup!");
+            // Set fallback values but wait for next frame to try again
+            this.gridOrigin = { x: 100, y: 50 };
+            this.time.delayedCall(10, () => this.setupGrid());
+            return;
+        }
+
         this.gridOrigin = {
             x: (this.cameras.main.width - this.cols * this.cellSize) / 2,
             y: 50
         };
 
+        // Validate that grid origin coordinates are valid numbers
+        if (isNaN(this.gridOrigin.x) || isNaN(this.gridOrigin.y)) {
+            console.error("Invalid grid origin coordinates:", this.gridOrigin);
+            // Set fallback values
+            this.gridOrigin = { x: 100, y: 50 };
+        }
+
+        console.log("Grid initialized:", {
+            cols: this.cols,
+            rows: this.rows,
+            cellSize: this.cellSize,
+            gridOrigin: this.gridOrigin
+        });
+
         // 背景タイルを配置
         for (let r = 0; r < this.rows; r++) {
             for (let c = 0; c < this.cols; c++) {
                 const center = this.getCellCenter(c, r);
-                const tile = this.add.image(center.x, center.y, 'tile');
-                tile.setDisplaySize(this.cellSize, this.cellSize);
-                tile.setDepth(0);
+
+                // Only create tile if we got valid coordinates
+                if (center && !isNaN(center.x) && !isNaN(center.y)) {
+                    const tile = this.add.image(center.x, center.y, 'tile');
+                    tile.setDisplaySize(this.cellSize, this.cellSize);
+                    tile.setDepth(0);
+                }
             }
         }
+
+        // Signal that grid is fully initialized
+        this.gridInitialized = true;
     }
 
     /**
      * 指定セルの中心座標を取得
+     * 位置が無効な場合のエラーハンドリング付き
      */
     getCellCenter(col, row) {
-        return {
-            x: this.gridOrigin.x + col * this.cellSize + this.cellSize / 2,
-            y: this.gridOrigin.y + row * this.cellSize + this.cellSize / 2
-        };
+        // Ensure grid is initialized
+        if (!this.gridOrigin || this.cellSize === undefined) {
+            console.error("Grid not initialized when getCellCenter was called");
+            return { x: this.cameras.main.centerX, y: this.cameras.main.centerY };
+        }
+
+        // Check for invalid or non-numeric inputs
+        if (col === undefined || col === null || row === undefined || row === null ||
+            isNaN(Number(col)) || isNaN(Number(row))) {
+
+            console.error(`Invalid cell coordinates: col=${col}, row=${row}`);
+
+            // Return a default position rather than crashing
+            return {
+                x: this.gridOrigin.x + this.cellSize / 2,  // First cell, x-center
+                y: this.gridOrigin.y + this.cellSize / 2   // First cell, y-center
+            };
+        }
+
+        // Convert to numbers if they're strings
+        const numCol = Number(col);
+        const numRow = Number(row);
+
+        // Make sure columns and rows are within bounds
+        const safeCol = Math.max(0, Math.min(Math.floor(numCol), this.cols - 1));
+        const safeRow = Math.max(0, Math.min(Math.floor(numRow), this.rows - 1));
+
+        // If we had to correct values, log it
+        if (safeCol !== numCol || safeRow !== numRow) {
+            console.warn(`Cell coordinates out of bounds, clamped: (${numCol},${numRow}) -> (${safeCol},${safeRow})`);
+        }
+
+        // Calculate center coordinates
+        const centerX = this.gridOrigin.x + safeCol * this.cellSize + this.cellSize / 2;
+        const centerY = this.gridOrigin.y + safeRow * this.cellSize + this.cellSize / 2;
+
+        // Final safety check for NaN (which can happen if gridOrigin is undefined)
+        if (isNaN(centerX) || isNaN(centerY)) {
+            console.error(`Calculated invalid center coordinates: x=${centerX}, y=${centerY}`);
+            return {
+                x: this.cameras.main.centerX,
+                y: this.cameras.main.centerY
+            };
+        }
+
+        return { x: centerX, y: centerY };
     }
 
     /**
@@ -310,9 +406,24 @@ export class GameScene extends Phaser.Scene {
      * ローカル側カードの入力有効化
      */
     enableLocalCardInput() {
+        if (!this.controller || !this.controller.gameLogic) {
+            console.warn("Cannot enable card input: controller or game logic not initialized");
+            return;
+        }
+
+        console.log(`Enabling input for ${this.localPlayer} cards`);
+
         Object.values(this.controller.gameLogic.cards).forEach(card => {
+            // Only add interaction to cards that belong to the local player
             if (card.owner === this.localPlayer && card.container) {
-                card.container.setInteractive();
+                console.log(`Enabling interaction for card ${card.id}`);
+
+                // Make the card interactive and draggable
+                card.container.setInteractive({ draggable: true });
+
+                // Make sure it's visible
+                card.container.setVisible(true);
+                card.isHidden = false;
             }
         });
     }
